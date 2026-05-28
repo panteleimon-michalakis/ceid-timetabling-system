@@ -1,0 +1,4 @@
+spring.datasource.url=jdbc:postgresql://localhost:5432/ceid_timetable
+spring.datasource.username=ceid_admin
+spring.datasource.password=${DB_PASSWORD}
+spring.jpa.hibernate.ddl-auto=update

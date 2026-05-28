@@ -1,0 +1,39 @@
+frontend_BACKUP_after_move_feature/ 
+frontend_backup_after_teacher_conflict/ 
+timetable_BACKUP_after_move_feature/ 
+timetable_backup_after_teacher_conflict/ 
+frontend/node_modules/ 
+frontend/dist/ 
+frontend/backups/ 
+timetable/target/ 
+timetable/debug-output/ 
+timetable/backups/ 
+
+# Java / Maven (backend)
+target/
+*.class
+
+# Node / Vite (frontend)
+node_modules/
+dist/
+dist-ssr/
+.vite/
+
+# Secrets / local config
+.env
+.env.*
+application-local.properties
+*-local.properties
+
+# IDE / Editor
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
