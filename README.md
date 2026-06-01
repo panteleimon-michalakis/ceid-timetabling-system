@@ -5,8 +5,7 @@ schedules** at the Computer Engineering & Informatics Department (CEID),
 University of Patras. Developed as my Diploma Thesis (Integrated Master).
 
 Faculty create and edit schedules through a management interface; students get a
-synchronized, read-only view. The system is designed to integrate the open-source
-**UniTime** CPSolver for automated, constraint-aware schedule generation.
+synchronized, read-only view. It uses the open-source Timefold Solver for automated, constraint-aware schedule generation.
 
 ## Features
 - Role-based access control: **Admin / Teacher / Student**
@@ -17,7 +16,7 @@ synchronized, read-only view. The system is designed to integrate the open-sourc
 - REST API backend with a React single-page front-end
 
 ## Tech stack
-**Backend:** Java 21, Spring Boot, Spring Data JPA, PostgreSQL, Maven
+**Backend:** Backend: Java 21, Spring Boot, Spring Data JPA, Timefold Solver, PostgreSQL, Maven
 **Frontend:** React, TypeScript, Vite, React Router, Axios
 
 ## Project structure
@@ -47,8 +46,7 @@ Runs on http://localhost:5173
 Active thesis project — under development.
 
 ## Acknowledgements
-Built around the open-source [UniTime](https://www.unitime.org/) university
-scheduling project.
+Automated scheduling powered by Timefold Solver — the open-source successor to OptaPlanner.
 
 ## Author
 **Panteleimon Michalakis** — CEID, University of Patras
