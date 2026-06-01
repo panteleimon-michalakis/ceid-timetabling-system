@@ -16,7 +16,7 @@ synchronized, read-only view. It uses the open-source Timefold Solver for automa
 - REST API backend with a React single-page front-end
 
 ## Tech stack
-**Backend:** Backend: Java 21, Spring Boot, Spring Data JPA, Timefold Solver, PostgreSQL, Maven
+**Backend:** Java 21, Spring Boot, Spring Data JPA, Timefold Solver, PostgreSQL, Maven  
 **Frontend:** React, TypeScript, Vite, React Router, Axios
 
 ## Project structure
