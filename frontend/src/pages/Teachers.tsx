@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
-import type { Teacher } from '../types';
+import { timetableService } from '../api/services';
+import type { Teacher, Timetable, TimetableAssignment } from '../types';
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
@@ -52,8 +53,12 @@ export default function Teachers() {
   const [teachers,      setTeachers]      = useState<Teacher[]>([]);
   const [selectedId,    setSelectedId]    = useState<number | null>(null);
   const [courses,       setCourses]       = useState<TeacherCourse[]>([]);
-  const [activeTab,     setActiveTab]     = useState<'info'|'courses'|'availability'>('info');
+  const [activeTab,     setActiveTab]     = useState<'info'|'courses'|'availability'|'schedule'>('info');
   const [loading,       setLoading]       = useState(true);
+  const [allTimetables,       setAllTimetables]       = useState<Timetable[]>([]);
+  const [scheduleId,          setScheduleId]          = useState<number | null>(null);
+  const [scheduleAssignments, setScheduleAssignments] = useState<TimetableAssignment[]>([]);
+  const [loadingSchedule,     setLoadingSchedule]     = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [search,        setSearch]        = useState('');
 
@@ -83,6 +88,12 @@ export default function Teachers() {
     api.get<Teacher[]>('/teachers')
       .then(r => setTeachers(r.data))
       .finally(() => setLoading(false));
+    timetableService.getAll()
+      .then(r => {
+        const sem = (r.data as Timetable[]).filter((t: Timetable) => t.timetableType === 'SEMESTER');
+        setAllTimetables(sem);
+        if (sem.length > 0) setScheduleId(sem[0].id);
+      });
   }, []);
 
   // ── Load detail when teacher selected ─────────────────────────────────────
@@ -103,6 +114,17 @@ export default function Teachers() {
       setSavedMap(new Map(m));
     }).finally(() => setLoadingDetail(false));
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || !scheduleId || courses.length === 0) { setScheduleAssignments([]); return; }
+    setLoadingSchedule(true);
+    timetableService.getAssignments(scheduleId)
+      .then(r => {
+        const courseIds = new Set(courses.map(c => c.courseId));
+        setScheduleAssignments((r.data as TimetableAssignment[]).filter(a => courseIds.has(a.course.id)));
+      })
+      .finally(() => setLoadingSchedule(false));
+  }, [selectedId, scheduleId, courses]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -327,7 +349,7 @@ export default function Teachers() {
 
           {/* Tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid #1a2744' }}>
-            {(['info','courses','availability'] as const).map(tab => (
+            {(['info','courses','availability','schedule'] as const).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)} style={{
                 padding: '10px 20px', border: 'none', background: 'transparent',
                 color: activeTab === tab ? '#e2e8f0' : '#475569', cursor: 'pointer',
@@ -337,7 +359,8 @@ export default function Teachers() {
               }}>
                 {tab === 'info' ? 'Στοιχεία'
                   : tab === 'courses' ? `Μαθήματα (${courses.length})`
-                  : 'Διαθεσιμότητα'}
+                  : tab === 'availability' ? 'Διαθεσιμότητα'
+                  : '📅 Πρόγραμμα'}
               </button>
             ))}
           </div>
@@ -490,6 +513,77 @@ export default function Teachers() {
                   {Array.from(cellMap.values()).filter(v => v === 'PREFERRED').length} preferred
                   {hasChanges && <span style={{ color: '#fbbf24', marginLeft: '8px' }}>● Μη αποθηκευμένες αλλαγές</span>}
                 </div>
+              </div>
+            )}
+
+            {/* ── SCHEDULE ── */}
+            {!loadingDetail && activeTab === 'schedule' && (
+              <div>
+                <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'18px' }}>
+                  <span style={{ fontSize:'11px', color:'#475569', fontFamily:'JetBrains Mono,monospace', textTransform:'uppercase', letterSpacing:'0.8px' }}>Πρόγραμμα</span>
+                  <select value={scheduleId ?? ''} onChange={e => setScheduleId(Number(e.target.value))}
+                    style={{ padding:'6px 10px', background:'#080f1a', border:'1px solid #1a2744', borderRadius:'7px', color:'#e2e8f0', fontSize:'13px', cursor:'pointer' }}>
+                    {allTimetables.map(t => <option key={t.id} value={t.id}>{t.name} ({t.semesterType === 'FALL' ? 'Χειμ' : 'Εαρ'})</option>)}
+                  </select>
+                  <span style={{ fontSize:'11px', color:'#334155', fontFamily:'JetBrains Mono,monospace' }}>{loadingSchedule ? 'Φόρτωση...' : `${scheduleAssignments.length} ώρες/εβδ`}</span>
+                </div>
+                {scheduleAssignments.length > 0 && (() => {
+                  const lec = scheduleAssignments.filter(a => a.assignmentType === 'LECTURE').length;
+                  const tut = scheduleAssignments.filter(a => a.assignmentType === 'TUTORIAL').length;
+                  const lab = scheduleAssignments.filter(a => a.assignmentType === 'LAB').length;
+                  return (
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'10px', marginBottom:'20px' }}>
+                      {[{label:'Θεωρία',val:lec,color:'#3b82f6'},{label:'Φροντιστήριο',val:tut,color:'#22c55e'},{label:'Εργαστήριο',val:lab,color:'#f59e0b'},{label:'Σύνολο',val:lec+tut+lab,color:'#94a3b8'}].map(s => (
+                        <div key={s.label} style={{ background:'#111e33', borderRadius:'8px', padding:'12px 14px', borderTop:`2px solid ${s.color}` }}>
+                          <div style={{ fontFamily:'JetBrains Mono,monospace', fontSize:'22px', fontWeight:600, color:s.color }}>{s.val}</div>
+                          <div style={{ fontSize:'11px', color:'#64748b', marginTop:'3px' }}>{s.label} ώρ/εβδ</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+                {scheduleAssignments.length === 0 && !loadingSchedule && (
+                  <div style={{ color:'#334155', fontSize:'13px', textAlign:'center', padding:'32px' }}>Δεν υπάρχουν αναθέσεις για αυτόν τον καθηγητή σε αυτό το πρόγραμμα.</div>
+                )}
+                {scheduleAssignments.length > 0 && (
+                  <div style={{ overflowX:'auto' }}>
+                    <table style={{ borderCollapse:'collapse', width:'100%', minWidth:'620px' }}>
+                      <thead><tr>
+                        <th style={{ padding:'7px 10px', fontSize:'10px', color:'#475569', fontFamily:'JetBrains Mono,monospace', fontWeight:400, textAlign:'left', width:'52px' }}>Ώρα</th>
+                        {DAYS.map(d => (<th key={d} style={{ padding:'7px 10px', fontSize:'12px', color:'#94a3b8', textAlign:'center', fontWeight:500 }}>{DAY_SHORT[d]}<div style={{ fontSize:'10px', color:'#334155', fontWeight:400 }}>{DAY_LBL[d].slice(3)}</div></th>))}
+                      </tr></thead>
+                      <tbody>
+                        {HOURS.map(h => (
+                          <tr key={h}>
+                            <td style={{ padding:'3px 10px 3px 0', fontSize:'11px', color:'#334155', fontFamily:'JetBrains Mono,monospace', verticalAlign:'top', paddingTop:'6px' }}>{String(h).padStart(2,'0')}:00</td>
+                            {DAYS.map(d => {
+                              const items = scheduleAssignments.filter(a => a.timeSlot?.dayOfWeek === d && a.timeSlot?.startTime?.startsWith(String(h).padStart(2,'0')));
+                              return (
+                                <td key={d} style={{ padding:'3px 4px', verticalAlign:'top', borderTop:'1px solid #0f1f38', minWidth:'110px' }}>
+                                  {items.map(a => {
+                                    const color = a.assignmentType==='LECTURE'?'#3b82f6':a.assignmentType==='TUTORIAL'?'#22c55e':'#f59e0b';
+                                    const bg = a.assignmentType==='LECTURE'?'#1e3a5f':a.assignmentType==='TUTORIAL'?'#14532d':'#451a03';
+                                    const lbl = a.assignmentType==='LECTURE'?'Θ':a.assignmentType==='TUTORIAL'?'Φ':'Ε';
+                                    return (
+                                      <div key={a.id} style={{ background:bg, border:`1px solid ${color}`, borderRadius:'5px', padding:'4px 6px', marginBottom:'2px' }}>
+                                        <div style={{ display:'flex', justifyContent:'space-between' }}>
+                                          <span style={{ fontSize:'9px', fontFamily:'JetBrains Mono,monospace', color, fontWeight:700 }}>{a.course?.code}</span>
+                                          <span style={{ fontSize:'9px', background:`${color}33`, color, borderRadius:'3px', padding:'0 4px', fontWeight:700 }}>{lbl}</span>
+                                        </div>
+                                        <div style={{ fontSize:'10px', color:'#cbd5e1', lineHeight:1.2 }}>{(a.course?.name?.length??0)>22?a.course.name.slice(0,21)+'…':a.course?.name}</div>
+                                        <div style={{ fontSize:'9px', color:'#475569', fontFamily:'JetBrains Mono,monospace', marginTop:'2px' }}>{a.room?.code}</div>
+                                      </div>
+                                    );
+                                  })}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </div>
