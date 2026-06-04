@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import api from '../api/client';
 import { courseService, roomService, timeSlotService, timetableService } from '../api/services';
 import type {
   Course,
@@ -205,7 +206,10 @@ export default function WeeklyTimetable() {
   const [movingAssignment, setMovingAssignment] = useState<TimetableAssignment | null>(null);
   const [draggingAssignment, setDraggingAssignment] = useState<TimetableAssignment | null>(null);
   const [dragOptions, setDragOptions] = useState<PlacementOptionsResponse | null>(null);
-  const [instantHintMap, setInstantHintMap] = useState<Map<string, 'allowed' | 'blocked'>>(new Map());
+  const [instantHintMap, setInstantHintMap] = useState<Map<string, 'allowed' | 'blocked' | 'preferred'>>(new Map());
+  const [teacherConstraintsMap, setTeacherConstraintsMap] = useState<
+    Map<string, Array<{dayOfWeek: string; hour: number; constraintType: string}>>
+  >(new Map());
 
   const [scheduling, setScheduling] = useState(false);
   const [autoScheduleResult, setAutoScheduleResult] = useState<AutoScheduleResult | null>(null);
@@ -310,14 +314,20 @@ const activeHintMap = draggingAssignment ? activeDragMap : slotHintMap;
     setError(null);
 
     try {
-      const [timetablesRes, coursesRes, roomsRes, timeSlotsRes] = await Promise.all([
+      const [timetablesRes, coursesRes, roomsRes, timeSlotsRes, teacherConRes] = await Promise.all([
         timetableService.getAll(),
         courseService.getAll(),
         roomService.getAll(),
         timeSlotService.getAll(),
+        api.get('/teachers/constraints/all').catch(() => ({ data: [] })),
       ]);
 
       setTimetables((timetablesRes.data as any[]).filter((t: any) => t.timetableType === 'SEMESTER'));
+      const tcMap = new Map<string, Array<{dayOfWeek: string; hour: number; constraintType: string}>>();
+      for (const entry of (teacherConRes.data as any[])) {
+        tcMap.set((entry.teacherName as string).toLowerCase(), entry.constraints);
+      }
+      setTeacherConstraintsMap(tcMap);
       setCourses(coursesRes.data);
       setRooms(roomsRes.data);
       setTimeSlots(timeSlotsRes.data);
@@ -404,12 +414,32 @@ function handleDragStart(assignment: TimetableAssignment) {
     }
   }
 
-  const instant = new Map<string, 'allowed' | 'blocked'>();
+  // Teacher availability constraints (BLOCKED → red, PREFERRED → bright green)
+  const preferred = new Set<string>();
+  const teacherNames = (assignment.course.teachersText ?? '')
+    .split(/[,;]/).map((n: string) => n.trim().toLowerCase()).filter(Boolean);
+  for (const name of teacherNames) {
+    for (const [mapName, constraints] of teacherConstraintsMap) {
+      const lastName = (s: string) => s.split(' ').pop() ?? '';
+      if (mapName === name || lastName(mapName) === lastName(name)) {
+        for (const c of constraints) {
+          const key = assignmentKey(c.dayOfWeek, `${String(c.hour).padStart(2,'0')}:00`);
+          if (c.constraintType === 'BLOCKED')    blocked.add(key);
+          else if (c.constraintType === 'PREFERRED') preferred.add(key);
+        }
+        break;
+      }
+    }
+  }
+
+  const instant = new Map<string, 'allowed' | 'blocked' | 'preferred'>();
   for (const ts of timeSlots) {
     if (ts.slotType !== 'SEMESTER' || !ts.dayOfWeek || !ts.startTime) continue;
     const key = assignmentKey(ts.dayOfWeek, normalizeTime(ts.startTime));
     if (!instant.has(key)) {
-      instant.set(key, blocked.has(key) ? 'blocked' : 'allowed');
+      if (blocked.has(key))        instant.set(key, 'blocked');
+      else if (preferred.has(key)) instant.set(key, 'preferred');
+      else                         instant.set(key, 'allowed');
     }
   }
   setInstantHintMap(instant);
@@ -997,22 +1027,25 @@ async function runSolver() {
     cursor: 'pointer',
     background: (() => {
       const hint = activeHintMap.get(assignmentKey(day.key, hour));
-      if (hint === 'allowed') return '#052e16';
-      if (hint === 'blocked') return '#1c0a0a';
+      if (hint === 'blocked')   return '#1c0a0a';
+      if (hint === 'preferred') return '#14532d';
+      if (hint === 'allowed')   return '#052e16';
       return slotAssignments.length === 0 ? '#0b1120' : '#111827';
     })(),
     borderLeft: (() => {
       const hint = activeHintMap.get(assignmentKey(day.key, hour));
-      if (hint === 'allowed') return '3px solid #22c55e';
-      if (hint === 'blocked') return '3px solid #7f1d1d';
+      if (hint === 'blocked')   return '3px solid #7f1d1d';
+      if (hint === 'preferred') return '3px solid #4ade80';
+      if (hint === 'allowed')   return '3px solid #22c55e';
       return cellStyle.borderRight;
     })(),
     transition: 'background 0.2s ease',
   }}
   title={(() => {
     const hint = activeHintMap.get(assignmentKey(day.key, hour));
-    if (hint === 'allowed') return 'Επιτρεπτή τοποθέτηση';
-    if (hint === 'blocked') return 'Μη επιτρεπτή τοποθέτηση';
+    if (hint === 'blocked')   return 'Μη επιτρεπτή τοποθέτηση';
+    if (hint === 'preferred') return '★ Προτιμώμενη ώρα καθηγητή';
+    if (hint === 'allowed')   return 'Επιτρεπτή τοποθέτηση';
     return 'Κλικ για προσθήκη μαθήματος';
   })()}
   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}

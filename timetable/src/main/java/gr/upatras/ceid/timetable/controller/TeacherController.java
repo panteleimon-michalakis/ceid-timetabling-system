@@ -196,4 +196,31 @@ public class TeacherController {
         if (initial.isEmpty()) return surname;
         return surname + "|" + initial;
     }
+
+@GetMapping("/constraints/all")
+public ResponseEntity<?> getAllTeacherConstraints() {
+    java.util.List<gr.upatras.ceid.timetable.entity.TeacherConstraint> all =
+        constraintRepo.findAllWithTeacher();
+    java.util.LinkedHashMap<Long, java.util.Map<String, Object>> grouped = new java.util.LinkedHashMap<>();
+    for (gr.upatras.ceid.timetable.entity.TeacherConstraint tc : all) {
+        Long tid = tc.getTeacher().getId();
+        grouped.computeIfAbsent(tid, k -> {
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("teacherId", tid);
+            m.put("teacherName", tc.getTeacher().getName());
+            m.put("constraints", new java.util.ArrayList<java.util.Map<String,Object>>());
+            return m;
+        });
+        @SuppressWarnings("unchecked")
+        java.util.List<java.util.Map<String,Object>> cons =
+            (java.util.List<java.util.Map<String,Object>>) grouped.get(tid).get("constraints");
+        cons.add(java.util.Map.of(
+            "dayOfWeek",       tc.getDayOfWeek().toString(),
+            "hour",            tc.getHour(),
+            "constraintType",  tc.getConstraintType().name()
+        ));
+    }
+    return ResponseEntity.ok(new java.util.ArrayList<>(grouped.values()));
+}
+
 }
