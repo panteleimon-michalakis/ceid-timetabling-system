@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
 import { timetableService } from '../api/services';
+import { generateIcal, downloadIcal } from '../utils/icalExport';
 import type { Teacher, Timetable, TimetableAssignment } from '../types';
 
 // ─── Local types ──────────────────────────────────────────────────────────────
@@ -526,6 +527,20 @@ export default function Teachers() {
                     {allTimetables.map(t => <option key={t.id} value={t.id}>{t.name} ({t.semesterType === 'FALL' ? 'Χειμ' : 'Εαρ'})</option>)}
                   </select>
                   <span style={{ fontSize:'11px', color:'#334155', fontFamily:'JetBrains Mono,monospace' }}>{loadingSchedule ? 'Φόρτωση...' : `${scheduleAssignments.length} ώρες/εβδ`}</span>
+                  {scheduleAssignments.length > 0 && scheduleId && (() => {
+                    const tt = allTimetables.find(t => t.id === scheduleId);
+                    if (!tt) return null;
+                    return (
+                      <button onClick={() => downloadIcal(
+                        `ceid-${(selected?.name ?? 'teacher').replace(/[\s.]+/g, '-')}.ics`,
+                        generateIcal(scheduleAssignments, tt, `Πρόγραμμα ${selected?.name ?? ''}`)
+                      )} style={{
+                        padding:'5px 12px', border:'none', borderRadius:'6px', background:'#1d4ed8',
+                        color:'#fff', fontSize:'11px', fontWeight:600, cursor:'pointer',
+                        fontFamily:"'IBM Plex Sans',sans-serif",
+                      }}>📥 iCal</button>
+                    );
+                  })()}
                 </div>
                 {scheduleAssignments.length > 0 && (() => {
                   const lec = scheduleAssignments.filter(a => a.assignmentType === 'LECTURE').length;

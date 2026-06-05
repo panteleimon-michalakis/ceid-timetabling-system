@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
+import { generateIcal, downloadIcal } from '../utils/icalExport';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -291,6 +292,22 @@ export default function StudentView() {
           <div style={{ fontSize: '11px', color: '#334155', fontFamily: 'JetBrains Mono, monospace' }}>
             {filtered.length} ώρες · {mode === 'personal' ? `${selectedCourses.size} μαθήματα` : 'όλα τα μαθήματα'}
           </div>
+          {selectedTt && filtered.length > 0 && (
+            <button
+              onClick={() => {
+                const name = mode === 'personal' ? 'Προσωπικό Πρόγραμμα' : (selectedTt.name ?? 'Πρόγραμμα');
+                downloadIcal(`ceid-${name.replace(/\s+/g, '-')}.ics`, generateIcal(filtered, selectedTt, name));
+              }}
+              style={{
+                marginTop: '8px', width: '100%', padding: '7px', border: 'none',
+                borderRadius: '7px', background: '#1d4ed8', color: '#fff',
+                fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                fontFamily: "'IBM Plex Sans', sans-serif",
+              }}
+            >
+              📥 Εξαγωγή iCal
+            </button>
+          )}
           <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
             {Object.entries(TYPE_COLOR).map(([type, { border, label }]) => (
               <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
