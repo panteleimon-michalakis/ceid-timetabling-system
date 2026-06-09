@@ -513,6 +513,89 @@ export default function ExamTimetable() {
   const allowedOptions = placementOptions?.options.filter(o => o.allowed) ?? [];
   const blockedOptions  = placementOptions?.options.filter(o => !o.allowed) ?? [];
 
+  function printExamSchedule() {
+    if (!selectedTimetable) return;
+    const YC = ['#2563eb','#059669','#7c3aed','#d97706','#dc2626'];
+    const assignedDates = new Set(
+      assignments.map(a => a.timeSlot?.specificDate).filter(Boolean) as string[]
+    );
+    const printDates = examDates.filter(d => assignedDates.has(d));
+    if (printDates.length === 0) { alert('Δεν υπάρχουν τοποθετημένες εξετάσεις.'); return; }
+    const ALL_HOURS = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00'];
+    const activeHours = ALL_HOURS.filter(hour =>
+      printDates.some(date =>
+        assignments.some(a =>
+          a.timeSlot?.specificDate === date &&
+          parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '0') === parseInt(hour)
+        )
+      )
+    );
+    function fmtDate(d: string) {
+      try { const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('el-GR', { weekday: 'short', day: 'numeric', month: 'numeric' }); }
+      catch { return d; }
+    }
+    function getCell(date: string, hour: string) {
+      const h = parseInt(hour);
+      const items = assignments.filter(a =>
+        a.timeSlot?.specificDate === date &&
+        parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '0') === h
+      );
+      if (!items.length) return '';
+      return items.map(a => {
+        const yc = YC[(a.course.studyYear ?? 1) - 1] ?? '#2563eb';
+        const dur = a.examDurationMinutes ? `${a.examDurationMinutes / 60}h` : '3h';
+        return `<div style="background:#f8fafc;border:1px solid ${yc};border-left:3px solid ${yc};border-radius:4px;padding:4px 6px;margin-bottom:3px;">
+          <div style="font-weight:700;color:${yc};font-family:monospace;font-size:7.5pt;">${a.course.code}</div>
+          <div style="font-size:8pt;font-weight:500;line-height:1.3;">${a.course.name}</div>
+          <div style="font-size:7pt;color:#64748b;">${a.room?.code ?? ''} · ${dur}</div>
+        </div>`;
+      }).join('');
+    }
+    const CHUNK = 8;
+    const chunks: string[][] = [];
+    for (let i = 0; i < printDates.length; i += CHUNK) chunks.push(printDates.slice(i, i + CHUNK));
+    const thStyle = `padding:6px 4px;background:#1e40af;color:white;text-align:center;font-size:8.5pt;min-width:110px;border:1px solid #3b82f6;`;
+    const legend = ['1ο Έτος','2ο Έτος','3ο Έτος','4ο Έτος','5ο Έτος'].map((y,i)=>`<div class="ld"><div class="ldot" style="background:${YC[i]}"></div>${y}</div>`).join('');
+    const tables = chunks.map((chunk, idx) => `
+      <div style="${idx < chunks.length - 1 ? 'page-break-after:always;' : ''}">
+        <div class="hdr">
+          <h1>Εξεταστική Περίοδος — ${selectedTimetable.name}${chunks.length > 1 ? ` (${idx+1}/${chunks.length})` : ''}</h1>
+          <p>ΤΜΗΥΠ · Πανεπιστήμιο Πατρών &nbsp;·&nbsp; ${fmtDate(chunk[0])} — ${fmtDate(chunk[chunk.length-1])}</p>
+          <div class="legend">${legend}</div>
+        </div>
+        <table><thead><tr>
+          <th style="padding:6px 8px;background:#1e40af;color:white;font-size:8.5pt;border:1px solid #3b82f6;min-width:50px;">Ώρα</th>
+          ${chunk.map(d=>`<th style="${thStyle}">${fmtDate(d)}<div style="font-size:7pt;opacity:0.75;">${d}</div></th>`).join('')}
+        </tr></thead><tbody>
+          ${activeHours.map(hour=>`<tr>
+            <td style="padding:4px 6px;font-weight:600;font-family:monospace;font-size:8.5pt;background:#f1f5f9;border:1px solid #e2e8f0;white-space:nowrap;">${hour}</td>
+            ${chunk.map(date=>`<td style="padding:3px;vertical-align:top;border:1px solid #e2e8f0;min-width:110px;">${getCell(date,hour)}</td>`).join('')}
+          </tr>`).join('')}
+        </tbody></table>
+      </div>`).join('');
+    const html = `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
+      <title>Εξεταστική — ${selectedTimetable.name}</title>
+      <style>
+        *{box-sizing:border-box;margin:0;padding:0;}
+        body{font-family:Arial,sans-serif;font-size:9pt;}
+        @page{size:297mm 210mm;margin:8mm;}
+        @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+        table{border-collapse:collapse;width:100%;}
+        .hdr{margin-bottom:8px;border-bottom:2px solid #1e40af;padding-bottom:5px;}
+        .hdr h1{font-size:12pt;color:#1e40af;} .hdr p{font-size:8pt;color:#64748b;}
+        .legend{display:flex;gap:10px;margin-top:5px;font-size:7.5pt;}
+        .ld{display:flex;align-items:center;gap:3px;}
+        .ldot{width:9px;height:9px;border-radius:2px;}
+        @media screen{.hint{background:#fef3c7;border:1px solid #d97706;border-radius:4px;padding:8px 14px;margin-bottom:10px;font-size:10pt;}}
+        @media print{.hint{display:none!important;}}
+      </style></head><body><div class="hint">⚠️ Για σωστή εκτύπωση: στο πεδίο <strong>Προορισμός</strong> επίλεξε <strong>"Αποθήκευση ως PDF"</strong> (όχι Microsoft Print to PDF) — ή επίλεξε <strong>Διάταξη → Οριζόντιος</strong>.</div>${tables}</body></html>`;
+    const win = window.open('', '_blank', 'width=1200,height=800');
+    if (!win) { alert('Επέτρεψε τα pop-ups του browser για εκτύπωση.'); return; }
+    win.document.write(html);
+    win.document.close();
+    win.onload = () => win.print();
+  }
+
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -561,6 +644,13 @@ export default function ExamTimetable() {
             </button>
             <button onClick={handleSolve} disabled={solving || saving} style={solverBtn}>
               {solving ? 'Εκτελείται...' : '⚡ CPSolver'}
+            </button>
+            <button
+              onClick={printExamSchedule}
+              disabled={assignments.length === 0}
+              style={{ ...solverBtn, background: assignments.length > 0 ? '#0f766e' : '#334155', border: 'none' }}
+            >
+              🖨 Εκτύπωση
             </button>
           </div>
         )}

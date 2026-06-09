@@ -851,9 +851,105 @@ async function runSolver() {
     return <div style={{ padding: '2rem' }}>Φόρτωση δεδομένων...</div>;
   }
 
+  function printWeeklyTimetable() {
+    if (!selectedTimetable || assignments.length === 0) return;
+    const YC = ['#2563eb','#059669','#7c3aed','#d97706','#dc2626'];
+    const TC: Record<string,{bg:string;border:string;label:string}> = {
+      LECTURE:  { bg:'#eff6ff', border:'#2563eb', label:'Θ' },
+      TUTORIAL: { bg:'#f0fdf4', border:'#16a34a', label:'Φ' },
+      LAB:      { bg:'#fffbeb', border:'#d97706', label:'Ε' },
+    };
+    const DAYS_ALL = [
+      {key:'MONDAY',label:'Δευτέρα'},{key:'TUESDAY',label:'Τρίτη'},
+      {key:'WEDNESDAY',label:'Τετάρτη'},{key:'THURSDAY',label:'Πέμπτη'},
+      {key:'FRIDAY',label:'Παρασκευή'},
+    ];
+    const HOURS_ALL = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00'];
+    const activeDays = DAYS_ALL.filter(d => assignments.some(a => a.timeSlot?.dayOfWeek === d.key));
+    const activeHours = HOURS_ALL.filter(h =>
+      activeDays.some(d => assignments.some(a =>
+        a.timeSlot?.dayOfWeek === d.key && a.timeSlot?.startTime?.startsWith(h.slice(0,2))
+      ))
+    );
+    function getCell(dayKey: string, hour: string): string {
+      const h = hour.slice(0,2);
+      const items = assignments.filter(a =>
+        a.timeSlot?.dayOfWeek === dayKey && a.timeSlot?.startTime?.startsWith(h)
+      );
+      if (!items.length) return '';
+      return items.map((a:any) => {
+        const type = a.assignmentType as string;
+        const tc = TC[type] ?? TC.LECTURE;
+        const yc = YC[(a.course.studyYear ?? 1) - 1] ?? '#2563eb';
+        return `<div style="background:${tc.bg};border:1px solid ${tc.border};border-left:3px solid ${yc};border-radius:4px;padding:4px 6px;margin-bottom:3px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+            <span style="font-weight:700;color:${yc};font-family:monospace;font-size:7.5pt;">${a.course.code}</span>
+            <span style="font-size:7pt;background:${tc.border}22;color:${tc.border};border-radius:2px;padding:1px 4px;font-weight:600;">${tc.label}</span>
+          </div>
+          <div style="font-size:8pt;font-weight:500;line-height:1.3;color:#1e293b;">${a.course.name}</div>
+          <div style="font-size:7pt;color:#64748b;">${a.room?.code ?? ''}</div>
+        </div>`;
+      }).join('');
+    }
+    const semType = (selectedTimetable as any).semesterType === 'FALL' ? 'Χειμερινό'
+                  : (selectedTimetable as any).semesterType === 'SPRING' ? 'Εαρινό' : '';
+    const thS = 'padding:8px 6px;background:#1e40af;color:white;text-align:center;font-size:9pt;border:1px solid #3b82f6;min-width:140px;';
+    const html = `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
+      <title>Ωρολόγιο — ${(selectedTimetable as any).name}</title>
+      <style>
+        *{box-sizing:border-box;margin:0;padding:0;}
+        body{font-family:Arial,sans-serif;font-size:9pt;}
+        @page{size:297mm 210mm;margin:8mm;}
+        @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+        table{border-collapse:collapse;width:100%;}
+        .hdr{margin-bottom:8px;border-bottom:2px solid #1e40af;padding-bottom:5px;}
+        .hdr h1{font-size:13pt;color:#1e40af;} .hdr p{font-size:8pt;color:#64748b;}
+        .legend{display:flex;gap:12px;margin-top:5px;font-size:7.5pt;flex-wrap:wrap;}
+        .ld{display:flex;align-items:center;gap:3px;}
+        .ldot{width:9px;height:9px;border-radius:2px;}
+        @media screen{.hint{background:#fef3c7;border:1px solid #d97706;border-radius:4px;padding:8px 14px;margin-bottom:10px;font-size:10pt;}}
+        @media print{.hint{display:none!important;}}
+      </style></head><body>
+      <div class="hint">⚠️ Για σωστή εκτύπωση: στο πεδίο <strong>Προορισμός</strong> επίλεξε <strong>"Αποθήκευση ως PDF"</strong> (όχι Microsoft Print to PDF) — ή επίλεξε <strong>Διάταξη → Οριζόντιος</strong>.</div>
+      <div class="hdr">
+        <h1>Ωρολόγιο Πρόγραμμα — ${(selectedTimetable as any).name}</h1>
+        <p>ΤΜΗΥΠ · Πανεπιστήμιο Πατρών${semType ? ` · ${semType} Εξάμηνο` : ''} · ${(selectedTimetable as any).academicYear ?? ''}</p>
+        <div class="legend">
+          ${[{l:'Θεωρία',c:'#2563eb'},{l:'Φροντιστήριο',c:'#16a34a'},{l:'Εργαστήριο',c:'#d97706'}]
+            .map(x=>`<div class="ld"><div class="ldot" style="background:${x.c};"></div>${x.l}</div>`).join('')}
+          &nbsp;&nbsp;
+          ${['1ο','2ο','3ο','4ο','5ο'].map((y,i)=>
+            `<div class="ld"><div class="ldot" style="background:${YC[i]};border-radius:50%;"></div>${y} Έτος</div>`
+          ).join('')}
+        </div>
+      </div>
+      <table><thead><tr>
+        <th style="padding:6px 8px;background:#1e40af;color:white;font-size:8.5pt;border:1px solid #3b82f6;min-width:50px;">Ώρα</th>
+        ${activeDays.map(d=>`<th style="${thS}">${d.label}</th>`).join('')}
+      </tr></thead><tbody>
+        ${activeHours.map(hour=>`<tr>
+          <td style="padding:4px 6px;font-weight:600;font-family:monospace;font-size:8.5pt;background:#f1f5f9;border:1px solid #e2e8f0;white-space:nowrap;">${hour}</td>
+          ${activeDays.map(d=>`<td style="padding:3px;vertical-align:top;border:1px solid #e2e8f0;">${getCell(d.key,hour)}</td>`).join('')}
+        </tr>`).join('')}
+      </tbody></table></body></html>`;
+    const win = window.open('', '_blank', 'width=1200,height=800');
+    if (!win) { alert('Επέτρεψε τα pop-ups του browser για εκτύπωση.'); return; }
+    win.document.write(html); win.document.close(); win.onload = () => win.print();
+  }
+
   return (
     <div style={{ padding: '40px 48px', background: '#080f1a', minHeight: 'calc(100vh - 52px)', fontFamily: "'IBM Plex Sans', sans-serif"     }}>
-    <style>{`@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains    +Mono:wght@400;500&display=swap');`}</style>
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+      @media print {
+        @page { size: A4 landscape; margin: 8mm; }
+        .ceid-nav  { display: none !important; }
+        .no-print  { display: none !important; }
+        aside      { display: none !important; }
+        .wt-main-grid { grid-template-columns: 1fr !important; }
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: white !important; }
+      }
+    `}</style>
 {error && (
   <div style={toastErrorStyle}>
     <strong>Σφάλμα</strong>
@@ -881,7 +977,7 @@ async function runSolver() {
 </button>
   </div>
 )}
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
+      <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
         <div>
           <h1 style={{ fontSize: '1.6rem', marginBottom: '0.35rem' }}>Ωρολόγιο Πρόγραμμα</h1>
           <p style={{ color: '#94a3b8' }}>
@@ -927,6 +1023,12 @@ async function runSolver() {
             </button>
           )}
 
+<button
+          onClick={printWeeklyTimetable}
+          disabled={!selectedTimetableId || assignments.length === 0}
+          style={{ padding: '6px 14px', border: '1px solid #0f766e', borderRadius: '7px', background: 'transparent', color: '#0f766e', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >🖨 Εκτύπωση</button>
+
   <button
     onClick={refreshEverything}
     disabled={saving || loadingTimetable}
@@ -945,19 +1047,21 @@ async function runSolver() {
       </div>
 
 
-<TimetableSelector
-        timetables={timetables}
-        selectedTimetableId={selectedTimetableId}
-        onSelect={handleSelectTimetable}
-        onCreated={handleTimetableCreated}
-        onDeleted={handleTimetableDeleted}
-        disabled={saving || loadingTimetable}
-        progress={progress}
-      />
+<div className="no-print">
+        <TimetableSelector
+          timetables={timetables}
+          selectedTimetableId={selectedTimetableId}
+          onSelect={handleSelectTimetable}
+          onCreated={handleTimetableCreated}
+          onDeleted={handleTimetableDeleted}
+          disabled={saving || loadingTimetable}
+          progress={progress}
+        />
+      </div>
 
       {selectedTimetableId && (
         <>
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="no-print" style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ color: '#94a3b8' }}>Φίλτρο έτους:</span>
             {[0, 1, 2, 3, 4, 5].map((year) => (
               <button
@@ -987,14 +1091,14 @@ async function runSolver() {
             )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+          <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
             <StatCard title="Τοποθετημένες ώρες" value={assignments.length} />
             <StatCard title="Πρόοδος" value={`${progress?.percentage ?? 0}%`} />
             <StatCard title="Errors" value={validation?.errorCount ?? 0} danger={(validation?.errorCount ?? 0) > 0} />
             <StatCard title="Warnings" value={validation?.warningCount ?? 0} warning={(validation?.warningCount ?? 0) > 0} />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
+          <div className="wt-main-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
             <section style={{ background: '#111827', border: '1px solid #1e293b', borderRadius: '12px', overflow: 'hidden' }}>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', minWidth: '950px', borderCollapse: 'collapse' }}>
