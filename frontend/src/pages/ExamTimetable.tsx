@@ -546,7 +546,7 @@ export default function ExamTimetable() {
             <button
               onClick={async () => {
                 try {
-                  await timetableService.generateExamSlots(selectedId);
+                  await timetableService.generateExamSlotsForTimetable(selectedId);
                   const tsRes = await timeSlotService.getExamSlots();
                   setExamTimeSlots(tsRes.data);
                   setMessage('Exam slots δημιουργήθηκαν! Ανανεώθηκε το grid.');
@@ -600,6 +600,44 @@ export default function ExamTimetable() {
             <StatCard label="Errors"   value={validation?.errorCount ?? 0}   color={(validation?.errorCount ?? 0) > 0 ? '#ef4444' : '#22c55e'} />
             <StatCard label="Warnings" value={validation?.warningCount ?? 0} color={(validation?.warningCount ?? 0) > 0 ? '#f59e0b' : '#22c55e'} />
           </div>
+
+          {/* ── Μπάρα προόδου εξεταστικής ─────────────────────────────── */}
+          {progress && (
+            <div style={{
+              background: '#0d1b2e', border: '1px solid #1a2744',
+              borderRadius: 10, padding: '14px 18px', marginBottom: '1.5rem',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 12, color: '#94a3b8', fontFamily: 'JetBrains Mono, monospace' }}>
+                  {progress.completedCourses} / {progress.totalCourses} εξετάσεις τοποθετημένες
+                </span>
+                <span style={{
+                  fontSize: 13, fontWeight: 700, fontFamily: 'JetBrains Mono, monospace',
+                  color: progress.percentage >= 100 ? '#22c55e'
+                       : (validation?.errorCount ?? 0) > 0 ? '#ef4444' : '#3b82f6',
+                }}>
+                  {Math.round(progress.percentage)}%
+                </span>
+              </div>
+              <div style={{ height: 8, background: '#1a2744', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%',
+                  width: `${Math.min(progress.percentage, 100)}%`,
+                  background: progress.percentage >= 100 ? '#22c55e'
+                             : (validation?.errorCount ?? 0) > 0 ? '#ef4444' : '#3b82f6',
+                  borderRadius: 4, transition: 'width 0.8s ease',
+                }} />
+              </div>
+              {progress.missingCourses.length > 0 && (
+                <div style={{
+                  fontSize: 10, color: '#f59e0b', marginTop: 7,
+                  fontFamily: 'JetBrains Mono, monospace',
+                }}>
+                  ● {progress.missingCourses.length} μαθήματα χωρίς τοποθετημένη εξέταση
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Grid + Right Panel */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '1.5rem', alignItems: 'start' }}>
@@ -689,6 +727,63 @@ export default function ExamTimetable() {
 
             {/* Right Panel */}
             <aside style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+              {/* ── Αδιάθετες εξετάσεις ──────────────────────────────── */}
+              {progress && progress.missingCourses.length > 0 && (
+                <section style={panelStyle}>
+                  <h3 style={panelTitle}>
+                    Αδιάθετες εξετάσεις
+                    <span style={{
+                      marginLeft: 8, fontFamily: 'JetBrains Mono, monospace',
+                      fontSize: 11, color: '#f59e0b',
+                    }}>
+                      ({progress.missingCourses.length})
+                    </span>
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflowY: 'auto' }}>
+                    {progress.missingCourses.map(c => (
+                      <div
+                        key={c.courseId}
+                        onClick={() => {
+                          setSelectedCourseId(c.courseId);
+                          setCourseSearch(c.name);
+                          setPlacementOptions(null);
+                        }}
+                        style={{
+                          background: selectedCourseId === c.courseId ? '#1e3a5f' : '#111e33',
+                          borderLeft: `3px solid ${selectedCourseId === c.courseId ? '#3b82f6' : '#f59e0b'}`,
+                          borderRadius: 6, padding: '7px 10px', cursor: 'pointer',
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          transition: 'background 0.1s',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 500, color: '#e2e8f0' }}>
+                            {c.name}
+                          </div>
+                          <div style={{
+                            fontSize: 10, fontFamily: 'JetBrains Mono, monospace',
+                            color: '#475569', marginTop: 2,
+                          }}>
+                            {c.code} · Εξ.{c.semester} · {c.studyYear}ο έτος
+                          </div>
+                        </div>
+                        <span style={{
+                          fontSize: 9, padding: '2px 6px', borderRadius: 3, flexShrink: 0,
+                          background: '#451a0322', color: '#f59e0b',
+                          border: '1px solid #78350f',
+                          fontFamily: 'JetBrains Mono, monospace', fontWeight: 700,
+                        }}>
+                          ΕΚΚΡΕΜΕΊ
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#334155', marginTop: 8 }}>
+                    Κλικ → επιλογή + «Βρες προτεινόμενες θέσεις»
+                  </div>
+                </section>
+              )}
 
               {/* Course + find options */}
               <section style={panelStyle}>
