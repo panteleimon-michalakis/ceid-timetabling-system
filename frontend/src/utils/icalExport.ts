@@ -166,3 +166,50 @@ export function downloadIcal(filename: string, content: string): void {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
+
+/** iCal εξεταστικού — specific dates, όχι recurring εβδομαδιαία events */
+export function generateExamIcal(
+  assignments: Array<{
+    id: number;
+    course: { code: string; name: string; semester: number };
+    room: { code: string; name?: string };
+    timeSlot: { specificDate?: string | null; startTime: string };
+    examDurationMinutes?: number | null;
+  }>,
+  calName = 'CEID Εξεταστική',
+): string {
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//CEID ΤΜΗΥΠ Πανεπιστήμιο Πατρών//Εξεταστικό Πρόγραμμα//EL',
+    `X-WR-CALNAME:${calName}`,
+    'X-WR-CALDESC:Εξεταστικό Πρόγραμμα ΤΜΗΥΠ — Πανεπιστήμιο Πατρών',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+  ];
+
+  for (const a of assignments) {
+    if (!a.timeSlot?.specificDate || !a.timeSlot?.startTime) continue;
+    const dateStr     = a.timeSlot.specificDate.replace(/-/g, '');
+    const [sH, sM]    = a.timeSlot.startTime.split(':').map(Number);
+    const durationMin = a.examDurationMinutes ?? 180;
+    const endMin      = sH * 60 + (sM ?? 0) + durationMin;
+    const dtStart = `${dateStr}T${String(sH).padStart(2,'0')}${String(sM??0).padStart(2,'0')}00`;
+    const dtEnd   = `${dateStr}T${String(Math.floor(endMin/60)).padStart(2,'0')}${String(endMin%60).padStart(2,'0')}00`;
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:ceid-exam-${a.id}@upatras.gr`,
+      `DTSTAMP:${new Date().toISOString().replace(/[-:.T]/g,'').slice(0,15)}`,
+      `DTSTART:${dtStart}`,
+      `DTEND:${dtEnd}`,
+      `SUMMARY:Εξέταση — ${a.course?.name ?? ''}`,
+      `LOCATION:${a.room?.name ?? a.room?.code ?? ''}`,
+      `DESCRIPTION:${a.course?.code ?? ''} · ${a.course?.semester ?? ''}ο Εξάμηνο\\nΑίθουσα: ${a.room?.code ?? ''}\\nΔιάρκεια: ${durationMin/60}h`,
+      'STATUS:CONFIRMED',
+      'TRANSP:OPAQUE',
+      'END:VEVENT',
+    );
+  }
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n');
+}
