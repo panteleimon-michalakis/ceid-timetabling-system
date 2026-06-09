@@ -34,7 +34,6 @@ export const courseService = {
 
 export const timeSlotService = {
   getAll: () => api.get<TimeSlot[]>('/timeslots'),
-  // Backend endpoint: GET /api/timeslots/type/{SEMESTER|EXAM}
   getSemesterSlots: () => api.get<TimeSlot[]>('/timeslots/type/SEMESTER'),
   getExamSlots: () => api.get<TimeSlot[]>('/timeslots/type/EXAM'),
 };
@@ -55,6 +54,11 @@ export const timetableService = {
     api.put<Timetable>(`/timetables/${id}`, data),
   delete: (id: number) => api.delete(`/timetables/${id}`),
 
+  // ── Publish workflow ─────────────────────────────────────────────────
+  publish:   (id: number) => api.put<Timetable>(`/timetables/${id}/publish`),
+  unpublish: (id: number) => api.put<Timetable>(`/timetables/${id}/unpublish`),
+
+  // ── Assignments ──────────────────────────────────────────────────────
   getAssignments: (id: number) =>
     api.get<TimetableAssignment[]>(`/timetables/${id}/assignments`),
 
@@ -79,24 +83,20 @@ export const timetableService = {
 
   getPlacementOptions: (id: number, courseId: number, assignmentType: string) =>
     api.get<PlacementOptionsResponse>(
-      `/timetables/${id}/placement-options`,
-      { params: { courseId, assignmentType } }
+      `/timetables/${id}/placement-options?courseId=${courseId}&assignmentType=${assignmentType}`
     ),
 
   autoSchedule: (id: number) =>
-    api.post(`/timetables/${id}/auto-schedule`),
+    api.post<SolverResult>(`/timetables/${id}/auto-schedule`),
 
-  solve: (id: number, timeLimit = 30) =>
-    api.post<SolverResult>(`/timetables/${id}/solve`, null, {
-      params: { timeLimit },
-      timeout: 180_000,
-    }),
+  solve: (id: number) =>
+    api.post<SolverResult>(`/timetables/${id}/solve`),
 
-  generateExamSlots: (id: number) =>
-    api.get(`/timetables/${id}/generate-exam-slots`),
-
-  generateExamSlotsLegacy: (data: GenerateExamSlotsRequest) =>
+  generateExamSlots: (data: GenerateExamSlotsRequest) =>
     api.post<GenerateExamSlotsResult>('/timetables/generate-exam-slots', data),
+
+  generateExamSlotsForTimetable: (id: number) =>
+    api.get(`/timetables/${id}/generate-exam-slots`),
 };
 
 export const healthService = {

@@ -44,8 +44,14 @@ public TimetableController(TimetableRepository timetableRepo,
 }
 
     @GetMapping
-    public List<Timetable> getAll() {
-        return timetableRepo.findAll();
+    public List<Timetable> getAll(org.springframework.security.core.Authentication auth) {
+        boolean isAdminOrTeacher = auth != null && auth.getAuthorities().stream()
+            .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN")
+                       || a.getAuthority().equals("ROLE_TEACHER"));
+        if (isAdminOrTeacher) {
+            return timetableRepo.findAll();
+        }
+        return timetableRepo.findByStatus(Timetable.Status.PUBLISHED);
     }
 
     @GetMapping("/{id}")
@@ -53,6 +59,34 @@ public TimetableController(TimetableRepository timetableRepo,
         return timetableRepo.findById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PutMapping("/{id}/publish")
+    public ResponseEntity<?> publish(@PathVariable Long id) {
+        return timetableRepo.findById(id).map(t -> {
+            // Εξαμηνιαίο: δεν επιτρέπεται δημοσίευση αν είναι κενό
+            if (t.getTimetableType() == Timetable.TimetableType.SEMESTER) {
+                boolean empty = assignmentRepo.findByTimetableId(id).isEmpty();
+                if (empty) {
+                    return (ResponseEntity<?>) ResponseEntity.badRequest()
+                        .body(Map.of("error",
+                            "Δεν μπορεί να δημοσιευτεί κενό πρόγραμμα. " +
+                            "Τοποθέτησε μαθήματα πρώτα."));
+                }
+            }
+            t.setStatus(Timetable.Status.PUBLISHED);
+            t.setPublishedAt(java.time.LocalDateTime.now());
+            return ResponseEntity.ok((Object) timetableRepo.save(t));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PutMapping("/{id}/unpublish")
+    public ResponseEntity<?> unpublish(@PathVariable Long id) {
+        return timetableRepo.findById(id).map(t -> {
+            t.setStatus(Timetable.Status.DRAFT);
+            t.setPublishedAt(null);
+            return ResponseEntity.ok((Object) timetableRepo.save(t));
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping
