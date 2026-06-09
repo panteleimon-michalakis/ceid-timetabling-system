@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
 import { timetableService } from '../api/services';
 import { generateIcal, downloadIcal } from '../utils/icalExport';
+import { useAuth } from '../context/AuthContext';
 import type { Teacher, Timetable, TimetableAssignment } from '../types';
 
 // ─── Local types ──────────────────────────────────────────────────────────────
@@ -51,6 +52,9 @@ function tc(type?: string | null) { return TYPE_COLORS[type ?? ''] ?? '#64748b';
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Teachers() {
+  const { user } = useAuth();
+  const isAdmin  = user?.role === 'ADMIN';
+
   const [teachers,      setTeachers]      = useState<Teacher[]>([]);
   const [selectedId,    setSelectedId]    = useState<number | null>(null);
   const [courses,       setCourses]       = useState<TeacherCourse[]>([]);
@@ -69,14 +73,14 @@ export default function Teachers() {
   const [saving,   setSaving]   = useState(false);
 
   // Add teacher modal
-  const [showAdd, setShowAdd]   = useState(false);
-  const [addForm, setAddForm]   = useState<Partial<Teacher>>({ teacherType: 'PROFESSOR' });
+  const [showAdd,   setShowAdd]   = useState(false);
+  const [addForm,   setAddForm]   = useState<Partial<Teacher>>({ teacherType: 'PROFESSOR' });
   const [addSaving, setAddSaving] = useState(false);
 
   // Availability / constraints
-  const [cellMap,     setCellMap]     = useState<Map<string, CellState>>(new Map());
-  const [savedMap,    setSavedMap]    = useState<Map<string, CellState>>(new Map());
-  const [savingCons,  setSavingCons]  = useState(false);
+  const [cellMap,    setCellMap]    = useState<Map<string, CellState>>(new Map());
+  const [savedMap,   setSavedMap]   = useState<Map<string, CellState>>(new Map());
+  const [savingCons, setSavingCons] = useState(false);
 
   const hasChanges = useMemo(() => {
     if (cellMap.size !== savedMap.size) return true;
@@ -253,9 +257,12 @@ export default function Teachers() {
             <h1 style={{ fontSize: '1.4rem', fontWeight: 600, marginBottom: '2px', letterSpacing: '-0.3px' }}>Καθηγητές</h1>
             <p style={{ color: '#64748b', fontSize: '12px' }}>ΤΜΗΥΠ · Πανεπιστήμιο Πατρών</p>
           </div>
-          <button onClick={() => setShowAdd(true)} style={{ ...btnPrimary, padding: '6px 12px', fontSize: '12px' }}>
-            + Νέος
-          </button>
+          {/* Κουμπί "Νέος" — μόνο για ADMIN */}
+          {isAdmin && (
+            <button onClick={() => setShowAdd(true)} style={{ ...btnPrimary, padding: '6px 12px', fontSize: '12px' }}>
+              + Νέος
+            </button>
+          )}
         </div>
 
         <input value={search} onChange={e => setSearch(e.target.value)}
@@ -331,21 +338,25 @@ export default function Teachers() {
                 )}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              {!editing ? (
-                <>
-                  <button onClick={startEdit} style={btnSecondary}>✏ Επεξεργασία</button>
-                  <button onClick={deleteTeacher} style={btnDanger}>🗑 Διαγραφή</button>
-                </>
-              ) : (
-                <>
-                  <button onClick={saveEdit} disabled={saving} style={btnPrimary}>
-                    {saving ? 'Αποθήκευση...' : '✓ Αποθήκευση'}
-                  </button>
-                  <button onClick={() => setEditing(false)} style={btnSecondary}>Ακύρωση</button>
-                </>
-              )}
-            </div>
+
+            {/* Κουμπιά Επεξεργασίας/Διαγραφής — μόνο για ADMIN */}
+            {isAdmin && (
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                {!editing ? (
+                  <>
+                    <button onClick={startEdit} style={btnSecondary}>✏ Επεξεργασία</button>
+                    <button onClick={deleteTeacher} style={btnDanger}>🗑 Διαγραφή</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={saveEdit} disabled={saving} style={btnPrimary}>
+                      {saving ? 'Αποθήκευση...' : '✓ Αποθήκευση'}
+                    </button>
+                    <button onClick={() => setEditing(false)} style={btnSecondary}>Ακύρωση</button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Tabs */}
@@ -383,7 +394,8 @@ export default function Teachers() {
                     <div style={{ fontSize: '10px', color: '#475569', marginBottom: '5px', textTransform: 'uppercase', letterSpacing: '0.8px', fontFamily: 'JetBrains Mono, monospace' }}>
                       {label}
                     </div>
-                    {editing ? (
+                    {/* Edit mode: μόνο για ADMIN */}
+                    {editing && isAdmin ? (
                       <input
                         value={(editForm as any)[field] ?? ''}
                         onChange={e => setEditForm(f => ({...f, [field]: e.target.value}))}
@@ -605,8 +617,8 @@ export default function Teachers() {
         </div>
       )}
 
-      {/* ══ ADD TEACHER MODAL ═══════════════════════════════════════════════ */}
-      {showAdd && (
+      {/* ══ ADD TEACHER MODAL — μόνο για ADMIN ════════════════════════════ */}
+      {showAdd && isAdmin && (
         <div onClick={() => setShowAdd(false)} style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
