@@ -2,3 +2,8 @@ spring.datasource.url=jdbc:postgresql://localhost:5432/ceid_timetable
 spring.datasource.username=ceid_admin
 spring.datasource.password=${DB_PASSWORD}
 spring.jpa.hibernate.ddl-auto=update
+
+# JWT Secret — ορίσε ως environment variable πριν εκκινήσεις τον server:
+# Windows: setx JWT_SECRET "your-strong-secret-here-at-least-32-chars"
+# Linux:   export JWT_SECRET="your-strong-secret-here-at-least-32-chars"
+jwt.secret=${JWT_SECRET:ceid-timetable-dev-secret-key-32-chars-min}
