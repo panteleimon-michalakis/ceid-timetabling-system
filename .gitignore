@@ -7,7 +7,8 @@ frontend/dist/
 frontend/backups/ 
 timetable/target/ 
 timetable/debug-output/ 
-timetable/backups/ 
+timetable/backups/
+backups/ 
 
 # Java / Maven (backend)
 target/
