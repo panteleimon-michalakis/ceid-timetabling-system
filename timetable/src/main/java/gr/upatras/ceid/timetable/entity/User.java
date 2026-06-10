@@ -41,6 +41,11 @@ public class User {
     @Column(length = 10)
     private String sector;
 
+    // Σύνδεση με εγγραφή Teacher (μόνο για χρήστες ρόλου TEACHER).
+    // Επιτρέπει στον καθηγητή να επεξεργάζεται ΜΟΝΟ τον δικό του φάκελο.
+    @Column(name = "teacher_id")
+    private Long teacherId;
+
     // Ενεργός λογαριασμός;
     @Column(nullable = false)
     private Boolean active;

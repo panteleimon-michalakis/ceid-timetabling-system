@@ -6,6 +6,9 @@ import gr.upatras.ceid.timetable.entity.TeacherConstraint;
 import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
 import gr.upatras.ceid.timetable.repository.TeacherConstraintRepository;
 import gr.upatras.ceid.timetable.repository.TeacherRepository;
+import gr.upatras.ceid.timetable.repository.UserRepository;
+import gr.upatras.ceid.timetable.entity.User;
+import org.springframework.security.core.Authentication;
 import gr.upatras.ceid.timetable.service.TeacherImportService;
 import gr.upatras.ceid.timetable.solver.TeacherAvailabilityConstraints;
 import gr.upatras.ceid.timetable.solver.TeacherAvailabilityRegistry;
@@ -24,17 +27,36 @@ public class TeacherController {
     private final CourseTeacherRepository courseTeacherRepo;
     private final TeacherConstraintRepository constraintRepo;
     private final TeacherImportService teacherImportService;
+    private final UserRepository userRepo;
 
     public TeacherController(
             TeacherRepository teacherRepo,
             CourseTeacherRepository courseTeacherRepo,
             TeacherConstraintRepository constraintRepo,
-            TeacherImportService teacherImportService
+            TeacherImportService teacherImportService,
+            UserRepository userRepo
     ) {
         this.teacherRepo = teacherRepo;
         this.courseTeacherRepo = courseTeacherRepo;
         this.constraintRepo = constraintRepo;
         this.teacherImportService = teacherImportService;
+        this.userRepo = userRepo;
+    }
+
+    /**
+     * Επιστρέφει true αν ο τρέχων χρήστης ΔΕΝ επιτρέπεται να επεξεργαστεί
+     * τον καθηγητή με το δοθέν id. ADMIN: πάντα επιτρέπεται. TEACHER:
+     * μόνο αν το teacherId του λογαριασμού του ταιριάζει.
+     */
+    private boolean isForbiddenToEditTeacher(Authentication auth, Long teacherId) {
+        if (auth == null) return true;
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+        if (isAdmin) return false;
+        // Μη-admin: πρέπει να είναι ο ιδιοκτήτης του φακέλου.
+        User current = userRepo.findByUsername(auth.getName()).orElse(null);
+        if (current == null || current.getTeacherId() == null) return true;
+        return !current.getTeacherId().equals(teacherId);
     }
 
     // ── Basic CRUD ──────────────────────────────────────────────────────────
@@ -57,7 +79,11 @@ public class TeacherController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Teacher> update(@PathVariable Long id, @RequestBody Teacher updated) {
+    public ResponseEntity<Teacher> update(@PathVariable Long id, @RequestBody Teacher updated,
+                                          Authentication auth) {
+        if (isForbiddenToEditTeacher(auth, id)) {
+            return ResponseEntity.status(403).build();
+        }
         return teacherRepo.findById(id).map(t -> {
             t.setName(updated.getName());
             t.setShortName(updated.getShortName());
@@ -125,8 +151,12 @@ public class TeacherController {
     @Transactional
     public ResponseEntity<?> updateConstraints(
             @PathVariable Long id,
-            @RequestBody List<Map<String, Object>> body) {
+            @RequestBody List<Map<String, Object>> body,
+            Authentication auth) {
 
+        if (isForbiddenToEditTeacher(auth, id)) {
+            return ResponseEntity.status(403).build();
+        }
         Teacher teacher = teacherRepo.findById(id).orElse(null);
         if (teacher == null) return ResponseEntity.notFound().build();
 
