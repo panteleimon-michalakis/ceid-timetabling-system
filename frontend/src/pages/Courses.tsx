@@ -15,7 +15,6 @@ const TYPE_CONFIG: Record<string, { label: string; color: string; bg: string }> 
 const SEM_TYPE: Record<string, string> = { FALL: 'Χειμ', SPRING: 'Εαρ', BOTH: 'Αμφ' };
 
 const COURSE_TYPES   = ['REQUIRED','REQUIRED_ELECTIVE','GENERAL_EDUCATION','EXTERNAL'];
-const SEMESTER_TYPES = ['FALL','SPRING','BOTH'];
 const SECTORS        = ['ΕΒ','ΛΥ','ΥΑ'];
 
 // ─── Styles ───────────────────────────────────────────────────────────────────

@@ -38,6 +38,19 @@ export const timeSlotService = {
   getExamSlots: () => api.get<TimeSlot[]>('/timeslots/type/EXAM'),
 };
 
+/**
+ * Απάντηση του greedy auto-scheduler.
+ * Έχει διαφορετικό σχήμα από το SolverResult του CPSolver.
+ */
+export interface AutoScheduleSummary {
+  timetableId: number;
+  totalPlaced: number;
+  totalFailed: number;
+  totalSkipped: number;
+  totalCourses: number;
+  log: string[];
+}
+
 export const timetableService = {
   getAll: () => api.get<Timetable[]>('/timetables'),
   getById: (id: number) => api.get<Timetable>(`/timetables/${id}`),
@@ -67,10 +80,16 @@ export const timetableService = {
     roomId: number;
     timeSlotId: number;
     assignmentType: string;
+    examDurationMinutes?: number;
+    isLocked?: boolean;
   }) => api.post<TimetableAssignment>(`/timetables/${id}/assignments`, data),
 
   removeAssignment: (assignmentId: number) =>
     api.delete(`/timetables/assignments/${assignmentId}`),
+
+  /** Μαζικό καθάρισμα όλων των αναθέσεων ενός προγράμματος (ADMIN). */
+  clearAssignments: (id: number) =>
+    api.delete(`/timetables/${id}/assignments`),
 
   moveAssignment: (assignmentId: number, data: { roomId?: number; timeSlotId?: number }) =>
     api.put<TimetableAssignment>(`/timetables/assignments/${assignmentId}/move`, data),
@@ -87,10 +106,10 @@ export const timetableService = {
     ),
 
   autoSchedule: (id: number) =>
-    api.post<SolverResult>(`/timetables/${id}/auto-schedule`),
+    api.post<AutoScheduleSummary>(`/timetables/${id}/auto-schedule`),
 
-  solve: (id: number) =>
-    api.post<SolverResult>(`/timetables/${id}/solve`),
+  solve: (id: number, timeLimitSeconds: number = 30) =>
+    api.post<SolverResult>(`/timetables/${id}/solve?timeLimit=${timeLimitSeconds}`),
 
   generateExamSlots: (data: GenerateExamSlotsRequest) =>
     api.post<GenerateExamSlotsResult>('/timetables/generate-exam-slots', data),

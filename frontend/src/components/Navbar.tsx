@@ -9,6 +9,7 @@ const ALL_NAV_LINKS = [
   { to: '/rooms',     label: 'Αίθουσες',    icon: '□', roles: ['ADMIN','TEACHER'] },
   { to: '/teachers',  label: 'Καθηγητές',   icon: '◈', roles: ['ADMIN','TEACHER'] },
   { to: '/view',      label: 'Προβολή',     icon: '⊙', roles: ['ADMIN','TEACHER','STUDENT'] },
+  { to: '/users',     label: 'Χρήστες',     icon: '◉', roles: ['ADMIN'] },
 ];
 
 const ROLE_CONFIG = {

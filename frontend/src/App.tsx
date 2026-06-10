@@ -9,6 +9,7 @@ import WeeklyTimetable from './pages/WeeklyTimetable';
 import ExamTimetable from './pages/ExamTimetable';
 import Teachers from './pages/Teachers';
 import StudentView from './pages/StudentView';
+import Users from './pages/Users';
 
 // ─── PrivateRoute — redirect στο /login αν δεν είσαι authenticated ────────────
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -62,6 +63,13 @@ function AppLayout() {
         <Route path="/teachers" element={
           <RoleRoute roles={['ADMIN', 'TEACHER']}>
             <Teachers />
+          </RoleRoute>
+        } />
+
+        {/* Μόνο ADMIN */}
+        <Route path="/users" element={
+          <RoleRoute roles={['ADMIN']}>
+            <Users />
           </RoleRoute>
         } />
 

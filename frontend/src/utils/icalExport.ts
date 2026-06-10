@@ -3,7 +3,25 @@
  * RFC 5545 compliant — συγχωνεύει συνεχόμενα slots σε ένα event
  */
 
-import type { TimetableAssignment, Timetable } from '../types';
+/**
+ * Ελάχιστο δομικό σχήμα ανάθεσης που χρειάζεται το iCal export.
+ * Επιτρέπει χρήση τόσο από TimetableAssignment όσο και από τα
+ * ελαφρύτερα local types σελίδων (π.χ. StudentView).
+ */
+export interface IcalTimetableInput {
+  id: number;
+  name: string;
+  academicYear?: string | null;
+  semesterType?: string | null;
+}
+
+export interface IcalAssignmentInput {
+  id: number;
+  assignmentType: string;
+  course: { id: number; code: string; name: string; semester?: number | null };
+  room?: { code?: string | null; name?: string | null } | null;
+  timeSlot: { dayOfWeek?: string | null; startTime?: string | null; endTime?: string | null };
+}
 
 const DAY_NUM: Record<string, number> = {
   MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3, THURSDAY: 4, FRIDAY: 5,
@@ -31,7 +49,7 @@ function fmtDT(date: Date, time: string): string {
 }
 
 /** Ημερομηνίες εξαμήνου */
-function semesterDates(t: Timetable): { start: Date; end: Date } {
+function semesterDates(t: IcalTimetableInput): { start: Date; end: Date } {
   const baseYear = parseInt((t.academicYear ?? '2025-26').split('-')[0]);
   if (t.semesterType === 'FALL')
     return { start: new Date(baseYear, 9, 1), end: new Date(baseYear + 1, 0, 31) };
@@ -52,9 +70,9 @@ interface MergedBlock {
  * π.χ. CEID_23Y106 LECTURE MONDAY 09:00-10:00 + 10:00-11:00 + 11:00-12:00
  *   → CEID_23Y106 LECTURE MONDAY 09:00-12:00 (ΕΝΑ event)
  */
-function mergeSlots(assignments: TimetableAssignment[]): MergedBlock[] {
+function mergeSlots(assignments: IcalAssignmentInput[]): MergedBlock[] {
   // Ομαδοποίηση ανά (course, type, day)
-  const groups = new Map<string, TimetableAssignment[]>();
+  const groups = new Map<string, IcalAssignmentInput[]>();
   for (const a of assignments) {
     if (!a.timeSlot?.dayOfWeek || !a.timeSlot?.startTime) continue;
     const key = `${a.course.id}__${a.assignmentType}__${a.timeSlot.dayOfWeek}`;
@@ -91,7 +109,7 @@ function mergeSlots(assignments: TimetableAssignment[]): MergedBlock[] {
   return blocks;
 }
 
-function makeBlock(a: TimetableAssignment, startTime: string, endTime: string): MergedBlock {
+function makeBlock(a: IcalAssignmentInput, startTime: string, endTime: string): MergedBlock {
   return {
     assignmentId:   a.id,
     courseName:     a.course?.name   ?? '',
@@ -107,8 +125,8 @@ function makeBlock(a: TimetableAssignment, startTime: string, endTime: string): 
 
 /** Δημιουργεί .ics string */
 export function generateIcal(
-  assignments: TimetableAssignment[],
-  timetable: Timetable,
+  assignments: IcalAssignmentInput[],
+  timetable: IcalTimetableInput,
   calName = 'CEID Πρόγραμμα',
 ): string {
   const { start, end } = semesterDates(timetable);

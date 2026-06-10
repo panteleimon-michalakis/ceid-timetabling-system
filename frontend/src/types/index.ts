@@ -14,6 +14,16 @@ export type TimetableStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 
 // --- Core Entities ---
 
+export interface Teacher {
+  id: number;
+  name: string;
+  shortName?: string | null;
+  teacherType?: string | null;
+  email?: string | null;
+  department?: string | null;
+  notes?: string | null;
+}
+
 export interface Room {
   id: number;
   name: string;

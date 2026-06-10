@@ -17,6 +17,7 @@ interface Assignment {
     id: number; code: string; name: string;
     semester: number; studyYear: number; courseType: string;
     sector?: string; teachersText?: string;
+    visibleInTimetable?: boolean;
   };
   room: { id: number; code: string; capacity: number; roomType: string };
   timeSlot: {
@@ -105,7 +106,9 @@ export default function StudentView() {
     setLoading(true);
     setAssignments([]);
     api.get<Assignment[]>(`/timetables/${selectedTtId}/assignments`)
-      .then(r => setAssignments(r.data))
+      // Μαθήματα «σε συνεννόηση» (visibleInTimetable=false) δεν εμφανίζονται
+      // στη δημόσια προβολή — ούτε στο grid, ούτε στο iCal export.
+      .then(r => setAssignments(r.data.filter((a: Assignment) => a.course?.visibleInTimetable !== false)))
       .finally(() => setLoading(false));
     // Load saved personal courses
     try {
@@ -235,10 +238,17 @@ export default function StudentView() {
         .course-row:hover { background: #1a2744 !important; }
         .tt-option:hover { background: #1a2744 !important; }
         .exam-cell:hover { background: #111e33 !important; }
+        @media print {
+          .ceid-nav { display: none !important; }
+          .sv-left-panel { display: none !important; }
+          .sv-main { grid-column: 1 / -1 !important; padding: 0 !important; }
+          body { background: white !important; color: black !important; }
+          -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
       `}</style>
 
       {/* ══ LEFT PANEL ══════════════════════════════════════════════════════ */}
-      <div style={{ borderRight: '1px solid #1a2744', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 52px)', position: 'sticky', top: '52px' }}>
+      <div className="sv-left-panel" style={{ borderRight: '1px solid #1a2744', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 52px)', position: 'sticky', top: '52px' }}>
 
         {/* Header */}
         <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid #1a2744' }}>
@@ -390,6 +400,17 @@ export default function StudentView() {
               </div>
               {selectedTt && filtered.length > 0 && (
                 <button
+                  onClick={() => window.print()}
+                  style={{
+                    marginTop: '8px', width: '100%', padding: '7px', border: 'none',
+                    borderRadius: '7px', background: '#0f766e', color: '#fff',
+                    fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                    fontFamily: "'IBM Plex Sans', sans-serif",
+                  }}
+                >🖨 Εκτύπωση</button>
+              )}
+              {selectedTt && filtered.length > 0 && (
+                <button
                   onClick={() => {
                     const name = mode === 'personal' ? 'Προσωπικό Πρόγραμμα' : (selectedTt.name ?? 'Πρόγραμμα');
                     downloadIcal(`ceid-${name.replace(/\s+/g, '-')}.ics`, generateIcal(filtered, selectedTt, name));
@@ -453,7 +474,7 @@ export default function StudentView() {
       </div>
 
       {/* ══ MAIN AREA ═══════════════════════════════════════════════════════ */}
-      <div style={{ overflow: 'auto', padding: '24px 28px' }}>
+      <div className="sv-main" style={{ overflow: 'auto', padding: '24px 28px' }}>
 
         {/* Title */}
         <div style={{ marginBottom: '16px' }}>

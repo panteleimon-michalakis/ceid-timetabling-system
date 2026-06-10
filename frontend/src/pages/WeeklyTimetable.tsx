@@ -853,6 +853,9 @@ async function runSolver() {
 
   function printWeeklyTimetable() {
     if (!selectedTimetable || assignments.length === 0) return;
+    const esc = (s: any) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    // Μαθήματα «σε συνεννόηση» δεν τυπώνονται στο επίσημο πρόγραμμα.
+    const printableAssignments = assignments.filter(a => a.course?.visibleInTimetable !== false);
     const YC = ['#2563eb','#059669','#7c3aed','#d97706','#dc2626'];
     const TC: Record<string,{bg:string;border:string;label:string}> = {
       LECTURE:  { bg:'#eff6ff', border:'#2563eb', label:'Θ' },
@@ -873,7 +876,7 @@ async function runSolver() {
     );
     function getCell(dayKey: string, hour: string): string {
       const h = hour.slice(0,2);
-      const items = assignments.filter(a =>
+      const items = printableAssignments.filter(a =>
         a.timeSlot?.dayOfWeek === dayKey && a.timeSlot?.startTime?.startsWith(h)
       );
       if (!items.length) return '';
@@ -883,11 +886,11 @@ async function runSolver() {
         const yc = YC[(a.course.studyYear ?? 1) - 1] ?? '#2563eb';
         return `<div style="background:${tc.bg};border:1px solid ${tc.border};border-left:3px solid ${yc};border-radius:4px;padding:4px 6px;margin-bottom:3px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
-            <span style="font-weight:700;color:${yc};font-family:monospace;font-size:7.5pt;">${a.course.code}</span>
+            <span style="font-weight:700;color:${yc};font-family:monospace;font-size:7.5pt;">${esc(a.course.code)}</span>
             <span style="font-size:7pt;background:${tc.border}22;color:${tc.border};border-radius:2px;padding:1px 4px;font-weight:600;">${tc.label}</span>
           </div>
-          <div style="font-size:8pt;font-weight:500;line-height:1.3;color:#1e293b;">${a.course.name}</div>
-          <div style="font-size:7pt;color:#64748b;">${a.room?.code ?? ''}</div>
+          <div style="font-size:8pt;font-weight:500;line-height:1.3;color:#1e293b;">${esc(a.course.name)}</div>
+          <div style="font-size:7pt;color:#64748b;">${esc(a.room?.code ?? '')}</div>
         </div>`;
       }).join('');
     }
@@ -895,7 +898,7 @@ async function runSolver() {
                   : (selectedTimetable as any).semesterType === 'SPRING' ? 'Εαρινό' : '';
     const thS = 'padding:8px 6px;background:#1e40af;color:white;text-align:center;font-size:9pt;border:1px solid #3b82f6;min-width:140px;';
     const html = `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
-      <title>Ωρολόγιο — ${(selectedTimetable as any).name}</title>
+      <title>Ωρολόγιο — ${esc((selectedTimetable as any).name)}</title>
       <style>
         *{box-sizing:border-box;margin:0;padding:0;}
         body{font-family:Arial,sans-serif;font-size:9pt;}
@@ -912,8 +915,8 @@ async function runSolver() {
       </style></head><body>
       <div class="hint">⚠️ Για σωστή εκτύπωση: στο πεδίο <strong>Προορισμός</strong> επίλεξε <strong>"Αποθήκευση ως PDF"</strong> (όχι Microsoft Print to PDF) — ή επίλεξε <strong>Διάταξη → Οριζόντιος</strong>.</div>
       <div class="hdr">
-        <h1>Ωρολόγιο Πρόγραμμα — ${(selectedTimetable as any).name}</h1>
-        <p>ΤΜΗΥΠ · Πανεπιστήμιο Πατρών${semType ? ` · ${semType} Εξάμηνο` : ''} · ${(selectedTimetable as any).academicYear ?? ''}</p>
+        <h1>Ωρολόγιο Πρόγραμμα — ${esc((selectedTimetable as any).name)}</h1>
+        <p>ΤΜΗΥΠ · Πανεπιστήμιο Πατρών${semType ? ` · ${semType} Εξάμηνο` : ''} · ${esc((selectedTimetable as any).academicYear ?? '')}</p>
         <div class="legend">
           ${[{l:'Θεωρία',c:'#2563eb'},{l:'Φροντιστήριο',c:'#16a34a'},{l:'Εργαστήριο',c:'#d97706'}]
             .map(x=>`<div class="ld"><div class="ldot" style="background:${x.c};"></div>${x.l}</div>`).join('')}

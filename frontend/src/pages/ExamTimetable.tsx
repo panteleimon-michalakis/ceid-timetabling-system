@@ -422,8 +422,10 @@ export default function ExamTimetable() {
     setSaving(true);
     try {
       await timetableService.addAssignment(selectedId, {
-        courseId: selectedCourseId, roomId: selectedRoomId,
-        timeSlotId: slotId, assignmentType: 'EXAM',
+        courseId: selectedCourseId,
+        roomId: opt.room.id,
+        timeSlotId: opt.timeSlot.id,
+        assignmentType: 'EXAM',
         examDurationMinutes: examDuration,
       });
       setPlacementOptions(null);
@@ -438,12 +440,12 @@ export default function ExamTimetable() {
     if (!draggingAssignment || !selectedId) return;
     const slotId = getExamSlotId(date, hour);
     if (!slotId) return;
-    const usedRooms = new Set(getAssignmentsAt(date, hour)
-      .filter(a => a.id !== draggingAssignment.id).map(a => a.room?.id));
+    // Κανόνας τμήματος: στην εξεταστική επιτρέπεται μοίρασμα αίθουσας,
+    // οπότε η μετακίνηση κρατά την αίθουσα της εξέτασης.
     let roomId = draggingAssignment.room?.id ?? 0;
-    if (usedRooms.has(roomId)) {
-      const available = rooms.find(r => !usedRooms.has(r.id) && r.availableForExams !== false);
-      if (available) roomId = available.id;
+    if (!roomId) {
+      const fallback = rooms.find(r => r.availableForExams !== false);
+      if (fallback) roomId = fallback.id;
     }
     setSaving(true);
     const moved = draggingAssignment;
@@ -462,7 +464,7 @@ export default function ExamTimetable() {
     if (!confirm('Εκτέλεση Solver;\n\nΘα αντικαταστήσει τις αυτόματες αναθέσεις.\nΟι χειροκίνητες θα παραμείνουν.\nΔιάρκεια: ~30 δευτερόλεπτα.')) return;
     setSolving(true);
     try {
-      const res = await timetableService.solve(selectedId, 30);
+      const res = await timetableService.solve(selectedId, 60);
       const d = res.data as any;
       setMessage(`Solver: ${d.totalPlaced} εξετάσεις τοποθετήθηκαν | Hard: ${d.hardScore} | Soft: ${d.softScore}`);
       setPlacementOptions(null);
@@ -515,9 +517,12 @@ export default function ExamTimetable() {
 
   function printExamSchedule() {
     if (!selectedTimetable) return;
+    const esc = (s: any) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    // Μαθήματα «σε συνεννόηση» δεν τυπώνονται στο επίσημο πρόγραμμα.
+    const printableAssignments = assignments.filter(a => a.course?.visibleInTimetable !== false);
     const YC = ['#2563eb','#059669','#7c3aed','#d97706','#dc2626'];
     const assignedDates = new Set(
-      assignments.map(a => a.timeSlot?.specificDate).filter(Boolean) as string[]
+      printableAssignments.map(a => a.timeSlot?.specificDate).filter(Boolean) as string[]
     );
     const printDates = examDates.filter(d => assignedDates.has(d));
     if (printDates.length === 0) { alert('Δεν υπάρχουν τοποθετημένες εξετάσεις.'); return; }
@@ -536,7 +541,7 @@ export default function ExamTimetable() {
     }
     function getCell(date: string, hour: string) {
       const h = parseInt(hour);
-      const items = assignments.filter(a =>
+      const items = printableAssignments.filter(a =>
         a.timeSlot?.specificDate === date &&
         parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '0') === h
       );
@@ -545,9 +550,9 @@ export default function ExamTimetable() {
         const yc = YC[(a.course.studyYear ?? 1) - 1] ?? '#2563eb';
         const dur = a.examDurationMinutes ? `${a.examDurationMinutes / 60}h` : '3h';
         return `<div style="background:#f8fafc;border:1px solid ${yc};border-left:3px solid ${yc};border-radius:4px;padding:4px 6px;margin-bottom:3px;">
-          <div style="font-weight:700;color:${yc};font-family:monospace;font-size:7.5pt;">${a.course.code}</div>
-          <div style="font-size:8pt;font-weight:500;line-height:1.3;">${a.course.name}</div>
-          <div style="font-size:7pt;color:#64748b;">${a.room?.code ?? ''} · ${dur}</div>
+          <div style="font-weight:700;color:${yc};font-family:monospace;font-size:7.5pt;">${esc(a.course.code)}</div>
+          <div style="font-size:8pt;font-weight:500;line-height:1.3;">${esc(a.course.name)}</div>
+          <div style="font-size:7pt;color:#64748b;">${esc(a.room?.code ?? '')} · ${dur}</div>
         </div>`;
       }).join('');
     }
@@ -559,7 +564,7 @@ export default function ExamTimetable() {
     const tables = chunks.map((chunk, idx) => `
       <div style="${idx < chunks.length - 1 ? 'page-break-after:always;' : ''}">
         <div class="hdr">
-          <h1>Εξεταστική Περίοδος — ${selectedTimetable.name}${chunks.length > 1 ? ` (${idx+1}/${chunks.length})` : ''}</h1>
+          <h1>Εξεταστική Περίοδος — ${esc(selectedTimetable.name)}${chunks.length > 1 ? ` (${idx+1}/${chunks.length})` : ''}</h1>
           <p>ΤΜΗΥΠ · Πανεπιστήμιο Πατρών &nbsp;·&nbsp; ${fmtDate(chunk[0])} — ${fmtDate(chunk[chunk.length-1])}</p>
           <div class="legend">${legend}</div>
         </div>
@@ -574,7 +579,7 @@ export default function ExamTimetable() {
         </tbody></table>
       </div>`).join('');
     const html = `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
-      <title>Εξεταστική — ${selectedTimetable.name}</title>
+      <title>Εξεταστική — ${esc(selectedTimetable.name)}</title>
       <style>
         *{box-sizing:border-box;margin:0;padding:0;}
         body{font-family:Arial,sans-serif;font-size:9pt;}
@@ -644,6 +649,23 @@ export default function ExamTimetable() {
             </button>
             <button onClick={handleSolve} disabled={solving || saving} style={solverBtn}>
               {solving ? 'Εκτελείται...' : '⚡ CPSolver'}
+            </button>
+            <button
+              onClick={async () => {
+                if (!selectedId) return;
+                if (!window.confirm('Σίγουρα θέλεις να αφαιρέσεις ΟΛΕΣ τις αναθέσεις του προγράμματος; Η ενέργεια δεν αναιρείται.')) return;
+                try {
+                  await timetableService.clearAssignments(selectedId);
+                  await reloadTimetableData();
+                  setMessage('Όλες οι αναθέσεις αφαιρέθηκαν.');
+                } catch (err: any) {
+                  setError(err?.response?.data?.error || 'Σφάλμα καθαρισμού αναθέσεων.');
+                }
+              }}
+              disabled={solving || saving || assignments.length === 0}
+              style={{ ...solverBtn, background: assignments.length > 0 ? '#b91c1c' : '#334155', border: 'none' }}
+            >
+              🗑 Καθαρισμός
             </button>
             <button
               onClick={printExamSchedule}
