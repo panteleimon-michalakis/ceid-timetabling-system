@@ -45,6 +45,10 @@ public class SolverService {
 
         Timetable timetable = timetableRepo.findById(timetableId).orElseThrow();
 
+        // Σήμανση ότι τρέχει ο solver (το UI εμφανίζει κατάσταση "ΕΠΕΞΕΡΓΑΣΙΑ").
+        timetable.setStatus(Timetable.Status.SOLVING);
+        timetableRepo.save(timetable);
+
 	// Φόρτωσε teacher availability constraints
 	loadConstraintsFromDb();
 
@@ -499,17 +503,9 @@ private boolean isGenericTeacherPlaceholder(String normalizedName) {
                     + " -> " + lesson.getTimeSlot() + " " + lesson.getRoom().getCode());
         }
 
-String timetableStatus = hardScoreName(solution.getScore());
-
-for (String statusName : List.of("GENERATED", "SOLVED", "READY")) {
-    try {
-        timetable.setStatus(Timetable.Status.valueOf(statusName));
-        break;
-    } catch (IllegalArgumentException ignored) {
-        // Αν το enum δεν έχει αυτό το status, δοκιμάζουμε το επόμενο.
-    }
-}
-
+// Μετά την επίλυση το πρόγραμμα είναι SOLVED. Δεν αλλάζει σε PUBLISHED
+// εδώ — αυτό γίνεται ρητά από τον ADMIN μέσω του publish workflow.
+timetable.setStatus(Timetable.Status.SOLVED);
 timetableRepo.save(timetable);
 
         Map<String, Object> result = new LinkedHashMap<>();

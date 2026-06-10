@@ -239,6 +239,10 @@ Object lockedValue = body.get("isLocked");
 boolean locked = Boolean.TRUE.equals(lockedValue)
         || "true".equalsIgnoreCase(String.valueOf(lockedValue));
 
+        // Προαιρετική διάρκεια εξέτασης (το UI τη στέλνει για EXAM αναθέσεις)
+        Integer examDuration = body.get("examDurationMinutes") instanceof Number n
+                ? n.intValue() : null;
+
         TimetableAssignment assignment = TimetableAssignment.builder()
                 .timetable(timetable)
                 .course(course)
@@ -247,6 +251,7 @@ boolean locked = Boolean.TRUE.equals(lockedValue)
                 .assignmentType(assignmentType)
                 .isLocked(locked)
                 .manuallyAssigned(true)
+                .examDurationMinutes(examDuration)
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -447,9 +452,13 @@ public ResponseEntity<?> getPlacementOptions(
 
         int score = 50;
 
-        // Χωρητικότητα αίθουσας
-        if (course.getExpectedStudents() > 0 && room.getCapacity() > 0) {
-            if (room.getCapacity() >= course.getExpectedStudents()) {
+        // Χωρητικότητα αίθουσας (null-safe: τα πεδία είναι Integer
+        // και μπορεί να είναι null — αλλιώς NPE από auto-unboxing)
+        int expectedStudents = autoSafeHours(course.getExpectedStudents());
+        int roomCapacity = autoSafeHours(room.getCapacity());
+
+        if (expectedStudents > 0 && roomCapacity > 0) {
+            if (roomCapacity >= expectedStudents) {
                 score += 15;
             } else {
                 score -= 20;
@@ -531,8 +540,8 @@ public ResponseEntity<?> getPlacementOptions(
 
         reasons.add("Η τοποθέτηση περνάει τους βασικούς κανόνες validation.");
 
-        if (course.getExpectedStudents() > 0 && room.getCapacity() > 0) {
-            if (room.getCapacity() >= course.getExpectedStudents()) {
+        if (autoSafeHours(course.getExpectedStudents()) > 0 && autoSafeHours(room.getCapacity()) > 0) {
+            if (autoSafeHours(room.getCapacity()) >= autoSafeHours(course.getExpectedStudents())) {
                 reasons.add("Η χωρητικότητα της αίθουσας είναι επαρκής για τους αναμενόμενους φοιτητές.");
             } else {
                 reasons.add("Η αίθουσα έχει μικρότερη χωρητικότητα από τους αναμενόμενους φοιτητές.");
@@ -912,7 +921,14 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
     // Για πρόγραμμα εξαμήνου:
     // Μετράμε τις απαιτούμενες και τοποθετημένες ώρες θεωρίας/φροντιστηρίου/εργαστηρίου.
     int totalRequiredHours = 0;
-    int totalPlacedHours = assignments.size();
+    // Μέτρα μόνο τις ώρες που ανήκουν σε relevant μαθήματα του εξαμήνου,
+    // ώστε πλεονάζουσες/εκτός-εξαμήνου αναθέσεις να μην παραποιούν το ποσοστό.
+    Set<Long> relevantCourseIds = relevantCourses.stream()
+            .map(Course::getId).filter(Objects::nonNull).collect(Collectors.toSet());
+    int totalPlacedHours = (int) assignments.stream()
+            .filter(a -> a.getCourse() != null && a.getCourse().getId() != null)
+            .filter(a -> relevantCourseIds.contains(a.getCourse().getId()))
+            .count();
     int completedCourses = 0;
 
     List<Map<String, Object>> missingCourses = new ArrayList<>();
@@ -1087,14 +1103,27 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
                         && a.getRoom().getId().equals(b.getRoom().getId())
                         && a.getTimeSlot().getId().equals(b.getTimeSlot().getId())) {
 
-                    errors.add(validationIssue(
-                            "ERROR",
-                            "ROOM_CONFLICT",
-                            "Η αίθουσα " + a.getRoom().getCode()
-                                    + " έχει δύο μαθήματα την ίδια ώρα: "
-                                    + a.getCourse().getName() + " και " + b.getCourse().getName() + ".",
-                            a.getId()
-                    ));
+                    if (examTimetable) {
+                        // Κανόνας τμήματος: το μοίρασμα αίθουσας στην εξεταστική
+                        // επιτρέπεται — ενημερωτική προειδοποίηση, όχι σφάλμα.
+                        warnings.add(validationIssue(
+                                "WARNING",
+                                "SHARED_EXAM_ROOM",
+                                "Η αίθουσα " + a.getRoom().getCode()
+                                        + " μοιράζεται την ίδια ώρα από: "
+                                        + a.getCourse().getName() + " και " + b.getCourse().getName() + ".",
+                                a.getId()
+                        ));
+                    } else {
+                        errors.add(validationIssue(
+                                "ERROR",
+                                "ROOM_CONFLICT",
+                                "Η αίθουσα " + a.getRoom().getCode()
+                                        + " έχει δύο μαθήματα την ίδια ώρα: "
+                                        + a.getCourse().getName() + " και " + b.getCourse().getName() + ".",
+                                a.getId()
+                        ));
+                    }
                 }
 
 
@@ -1630,7 +1659,10 @@ if (examTimetable
         boolean sameSlot = existing.getTimeSlot() != null
                 && Objects.equals(existing.getTimeSlot().getId(), timeSlot.getId());
 
-        if (sameRoom && sameSlot) {
+        // Κανόνας τμήματος: στην εξεταστική πολλαπλές εξετάσεις επιτρέπεται
+        // να μοιράζονται την ίδια αίθουσα την ίδια ώρα — ο έλεγχος
+        // κατειλημμένης αίθουσας ισχύει μόνο για εβδομαδιαία προγράμματα.
+        if (sameRoom && sameSlot && !examAssignment) {
             String existingCourseName = existing.getCourse() != null
                     ? existing.getCourse().getName()
                     : "άγνωστο μάθημα";
@@ -1745,7 +1777,9 @@ if (examTimetable
             return ResponseEntity.notFound().build();
         }
         try {
-            Map<String, Object> result = solverService.solve(id, timeLimit);
+            // Όριο 5–120 δευτ.: κακό/κακόβουλο input δεν δεσμεύει τον server
+            int safeLimit = Math.max(5, Math.min(timeLimit, 120));
+            Map<String, Object> result = solverService.solve(id, safeLimit);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             return ResponseEntity.internalServerError()
@@ -1862,6 +1896,9 @@ if (examTimetable
                                 .assignmentType(assignmentType)
                                 .isLocked(false)
                                 .manuallyAssigned(false)
+                                .examDurationMinutes(
+                                        assignmentType == TimetableAssignment.AssignmentType.EXAM
+                                                ? course.getExamDurationMinutes() : null)
                                 .createdAt(LocalDateTime.now())
                                 .build();
 
@@ -2004,17 +2041,25 @@ if (examTimetable
             reasons.add("Το Εργαστήριο απαιτεί αίθουσα τύπου LAB");
         }
 
+        // Ευθυγράμμιση με validateAssignment: BOTH μαθήματα και προγράμματα
+        // SEPTEMBER επιτρέπονται παντού.
         if (timetable.getSemesterType() != null && course.getSemesterType() != null
+                && !timetable.getSemesterType().name().equals("SEPTEMBER")
+                && !course.getSemesterType().name().equals("BOTH")
                 && !timetable.getSemesterType().name().equals(course.getSemesterType().name())) {
             reasons.add("Το μάθημα ανήκει σε άλλο εξάμηνο");
         }
 
-        for (TimetableAssignment existing : assignments) {
-            if (existing.getRoom() != null && existing.getTimeSlot() != null
-                    && existing.getRoom().getId().equals(room.getId())
-                    && existing.getTimeSlot().getId().equals(timeSlot.getId())) {
-                reasons.add("Η αίθουσα είναι ήδη κατειλημμένη");
-                break;
+        // Κανόνας τμήματος: στην εξεταστική επιτρέπεται μοίρασμα αίθουσας,
+        // οπότε η κατειλημμένη αίθουσα μπλοκάρει μόνο εβδομαδιαία προγράμματα.
+        if (timetable.getTimetableType() != Timetable.TimetableType.EXAM) {
+            for (TimetableAssignment existing : assignments) {
+                if (existing.getRoom() != null && existing.getTimeSlot() != null
+                        && existing.getRoom().getId().equals(room.getId())
+                        && existing.getTimeSlot().getId().equals(timeSlot.getId())) {
+                    reasons.add("Η αίθουσα είναι ήδη κατειλημμένη");
+                    break;
+                }
             }
         }
 
@@ -2497,6 +2542,7 @@ private List<String> sortTeacherDisplayNames(Collection<String> names) {
         dto.put("semesterType", course.getSemesterType() != null ? course.getSemesterType().name() : null);
         dto.put("expectedStudents", course.getExpectedStudents());
         dto.put("teachersText", normalizeTeachersTextForDto(course.getTeachersText()));
+        dto.put("visibleInTimetable", course.getVisibleInTimetable());
 
         return dto;
     }

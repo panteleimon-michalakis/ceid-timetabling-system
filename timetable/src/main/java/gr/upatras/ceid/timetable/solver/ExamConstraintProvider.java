@@ -4,6 +4,7 @@ import ai.timefold.solver.core.api.score.buildin.hardsoft.HardSoftScore;
 import ai.timefold.solver.core.api.score.stream.Constraint;
 import ai.timefold.solver.core.api.score.stream.ConstraintFactory;
 import ai.timefold.solver.core.api.score.stream.ConstraintProvider;
+import ai.timefold.solver.core.api.score.stream.ConstraintCollectors;
 import ai.timefold.solver.core.api.score.stream.Joiners;
 
 
@@ -24,12 +25,15 @@ public class ExamConstraintProvider implements ConstraintProvider {
 public Constraint[] defineConstraints(ConstraintFactory factory) {
     return new Constraint[]{
             // HARD
-            roomConflict(factory),
             teacherConflict(factory),
             requiredSameYearSameDay(factory),
 
             // SOFT
-            roomCapacityMatch(factory),
+            sharedRoomCapacity(factory),
+            sameYearSameDay(factory),
+            dailyLoadBalance(factory),
+            preferDistinctRoomsWithinSlot(factory),
+            requiredBeforeElectives(factory),
             spreadSameYear(factory),
             directionGroupADifferentDays(factory),
             teacherMultipleExamsSameDay(factory),
@@ -37,19 +41,8 @@ public Constraint[] defineConstraints(ConstraintFactory factory) {
     };
 }
 
-    // ===================== HARD =====================
 
-    /**
-     * HARD: Δύο εξετάσεις δεν μπορούν στην ίδια αίθουσα, ίδια ώρα.
-     */
-    Constraint roomConflict(ConstraintFactory factory) {
-        return factory.forEachUniquePair(Lesson.class,
-                        Joiners.equal(Lesson::getTimeSlot),
-                        Joiners.equal(Lesson::getRoom))
-                .filter((a, b) -> a.getTimeSlot() != null && a.getRoom() != null)
-                .penalize(HardSoftScore.ONE_HARD)
-                .asConstraint("Exam room conflict");
-    }
+    // ===================== HARD =====================
 
     /**
      * HARD: Καθηγητής δεν μπορεί σε δύο εξετάσεις ταυτόχρονα.
@@ -88,23 +81,26 @@ Constraint requiredSameYearSameDay(ConstraintFactory factory) {
 
     // ===================== SOFT =====================
 
-/**
- * SOFT: Αν η αίθουσα έχει μικρότερη χωρητικότητα από τους αναμενόμενους
- * φοιτητές, δεν μπλοκάρουμε την τοποθέτηση, αλλά τη βαθμολογούμε χειρότερα.
- *
- * Αυτό είναι σωστό για εξεταστική, γιατί αρκετές εξετάσεις μπορούν πρακτικά
- * να μοιραστούν σε περισσότερες από μία αίθουσες.
- */
-Constraint roomCapacityMatch(ConstraintFactory factory) {
-    return factory.forEach(Lesson.class)
-            .filter(l -> l.getRoom() != null
-                    && l.getExpectedStudents() > 0
-                    && l.getRoom().getCapacity() > 0
-                    && l.getExpectedStudents() > l.getRoom().getCapacity())
-            .penalize(HardSoftScore.ONE_SOFT,
-                    l -> l.getExpectedStudents() - l.getRoom().getCapacity())
-            .asConstraint("Exam room capacity exceeded");
-}
+
+    /**
+     * SOFT: Κανόνας τμήματος — πολλαπλές εξετάσεις ΕΠΙΤΡΕΠΕΤΑΙ να μοιράζονται
+     * την ίδια αίθουσα την ίδια ώρα. Ποινή υπάρχει μόνο όταν το ΑΘΡΟΙΣΜΑ των
+     * αναμενόμενων φοιτητών όλων των εξετάσεων της αίθουσας ξεπερνά τη
+     * χωρητικότητά της, αναλογικά με το μέγεθος της υπέρβασης.
+     */
+    Constraint sharedRoomCapacity(ConstraintFactory factory) {
+        return factory.forEach(Lesson.class)
+                .filter(l -> l.getRoom() != null && l.getTimeSlot() != null)
+                .groupBy(Lesson::getRoom,
+                         Lesson::getTimeSlot,
+                         ConstraintCollectors.sum(Lesson::getExpectedStudents))
+                .filter((room, slot, totalStudents) ->
+                        room.getCapacity() > 0 && totalStudents > room.getCapacity())
+                .penalize(HardSoftScore.ONE_SOFT,
+                        (room, slot, totalStudents) -> totalStudents - room.getCapacity())
+                .asConstraint("Shared exam room over capacity");
+    }
+
 
     /**
  * SOFT: Οι υποχρεωτικές εξετάσεις του ίδιου έτους καλό είναι να είναι
@@ -167,6 +163,77 @@ Constraint spreadSameYear(ConstraintFactory factory) {
                         && l.getTimeSlot().getStartHour() >= 15)
                 .penalize(HardSoftScore.ONE_SOFT, l -> 1)
                 .asConstraint("Prefer morning for large exams");
+    }
+
+    /**
+     * SOFT: Εξετάσεις του ίδιου έτους αποθαρρύνονται την ίδια μέρα όταν
+     * τουλάχιστον η μία είναι επιλογής/ΓΠ, ώστε φοιτητής του ίδιου έτους
+     * να μην βρεθεί με πολλές εξετάσεις μαζεμένες. Το ζεύγος
+     * υποχρεωτικό+υποχρεωτικό καλύπτεται ήδη από το HARD
+     * requiredSameYearSameDay, οπότε εξαιρείται εδώ.
+     */
+    Constraint sameYearSameDay(ConstraintFactory factory) {
+        return factory.forEachUniquePair(Lesson.class,
+                        Joiners.equal(Lesson::getStudyYear),
+                        Joiners.equal(l -> l.getTimeSlot() != null
+                                ? l.getTimeSlot().getDayKey() : ""))
+                .filter((a, b) ->
+                        a.getTimeSlot() != null
+                        && b.getTimeSlot() != null
+                        && !(a.isRequired() && b.isRequired())
+                        && !a.getCourseId().equals(b.getCourseId()))
+                .penalize(HardSoftScore.ONE_SOFT, (a, b) -> 6)
+                .asConstraint("Same-year exams stacked on same day");
+    }
+
+    /**
+     * SOFT: Όταν στο ίδιο slot συνυπάρχουν πολλές εξετάσεις, προτιμάμε να
+     * κατανέμονται σε διαφορετικές αίθουσες όσο υπάρχουν διαθέσιμες.
+     * Το μοίρασμα αίθουσας παραμένει επιτρεπτό (κανόνας τμήματος #3) —
+     * η ποινή είναι σκόπιμα ελαφριά (1) ώστε να λειτουργεί μόνο ως
+     * tie-breaker κατανομής, ποτέ ενάντια σε σημαντικότερους κανόνες.
+     */
+    Constraint preferDistinctRoomsWithinSlot(ConstraintFactory factory) {
+        return factory.forEachUniquePair(Lesson.class,
+                        Joiners.equal(Lesson::getTimeSlot),
+                        Joiners.equal(Lesson::getRoom))
+                .filter((a, b) -> a.getTimeSlot() != null && a.getRoom() != null)
+                .penalize(HardSoftScore.ONE_SOFT)
+                .asConstraint("Prefer distinct exam rooms within slot");
+    }
+
+    /**
+     * SOFT: Εξισορρόπηση φόρτου ανά ημέρα. Κάθε ζεύγος εξετάσεων στην ίδια
+     * ημερομηνία κοστίζει 1, άρα μέρα με n εξετάσεις κοστίζει n(n-1)/2.
+     * Η τετραγωνική αύξηση σπρώχνει τον solver να απλώσει το πρόγραμμα
+     * σε όλο το διαθέσιμο εύρος (~4 εβδομάδες) αντί να στοιβάζει τα
+     * μαθήματα επιλογής στις πρώτες μέρες — διασπορά που πριν επιβαλλόταν
+     * έμμεσα (και κατά λάθος) από το hard room conflict.
+     */
+    Constraint dailyLoadBalance(ConstraintFactory factory) {
+        return factory.forEachUniquePair(Lesson.class,
+                        Joiners.equal(l -> l.getTimeSlot() != null
+                                ? l.getTimeSlot().getDayKey() : ""))
+                .filter((a, b) -> a.getTimeSlot() != null && b.getTimeSlot() != null)
+                .penalize(HardSoftScore.ONE_SOFT)
+                .asConstraint("Daily exam load balance");
+    }
+
+   /**
+     * SOFT (προαιρετική προτίμηση γραμματείας): τα υποχρεωτικά μαθήματα
+     * προτιμάται να εξετάζονται νωρίτερα από τα επιλογής. Ποινή 1 για κάθε
+     * ζεύγος (υποχρεωτικό, επιλογής) όπου το υποχρεωτικό είναι αργότερα.
+     */
+    Constraint requiredBeforeElectives(ConstraintFactory factory) {
+        return factory.forEach(Lesson.class)
+                .filter(l -> l.getTimeSlot() != null && l.isRequired())
+                .join(Lesson.class)
+                .filter((req, el) -> el.getTimeSlot() != null
+                        && !el.isRequired()
+                        && req.getTimeSlot().getDayKey()
+                              .compareTo(el.getTimeSlot().getDayKey()) > 0)
+                .penalize(HardSoftScore.ONE_SOFT)
+                .asConstraint("Required exams before electives");
     }
 
     // ===================== HELPERS =====================
