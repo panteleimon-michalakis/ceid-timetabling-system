@@ -1,5 +1,6 @@
 package gr.upatras.ceid.timetable.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -12,6 +13,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -19,6 +21,10 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+
+    // Comma-separated origins. Σε παραγωγή: ορίζεται μέσω env var CORS_ORIGINS.
+    @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:3000}")
+    private String allowedOrigins;
 
     public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
         this.jwtAuthFilter = jwtAuthFilter;
@@ -42,8 +48,31 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
 
-                // ── Ανάγνωση: όλοι οι συνδεδεμένοι ──────────────────────
-                .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
+                // ── Διαχείριση χρηστών ────────────────────────────────────
+                // Αλλαγή δικού μου κωδικού: κάθε συνδεδεμένος χρήστης.
+                .requestMatchers(HttpMethod.PUT, "/api/users/me/password").authenticated()
+                // Όλα τα υπόλοιπα /api/users/**: μόνο ADMIN (πριν το γενικό GET!)
+                .requestMatchers("/api/users/**").hasRole("ADMIN")
+
+                // ── Ωρολόγια — ADMIN-only actions (πιο ειδικά πρώτα) ─────
+                .requestMatchers(HttpMethod.PUT, "/api/timetables/*/publish").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PUT, "/api/timetables/*/unpublish").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/timetables").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/timetables/*/solve").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/timetables/*/auto-schedule").hasRole("ADMIN")
+                // Μαζική δημιουργία exam slots: μόνο ADMIN
+                .requestMatchers(HttpMethod.POST, "/api/timetables/generate-exam-slots").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/timetables/*/generate-exam-slots").hasRole("ADMIN")
+                // Μαζικό καθάρισμα αναθέσεων ενός προγράμματος: μόνο ADMIN
+                .requestMatchers(HttpMethod.DELETE, "/api/timetables/*/assignments").hasRole("ADMIN")
+                // Διαγραφή ωρολογίου: μόνο ADMIN
+                .requestMatchers(HttpMethod.DELETE, "/api/timetables/*").hasRole("ADMIN")
+
+                // ── Ωρολόγια — ADMIN + TEACHER (αναθέσεις drag & drop) ───
+                .requestMatchers(HttpMethod.DELETE, "/api/timetables/assignments/**").hasAnyRole("ADMIN", "TEACHER")
+                .requestMatchers(HttpMethod.POST,   "/api/timetables/**").hasAnyRole("ADMIN", "TEACHER")
+                .requestMatchers(HttpMethod.PUT,    "/api/timetables/**").hasAnyRole("ADMIN", "TEACHER")
+                .requestMatchers(HttpMethod.DELETE, "/api/timetables/**").hasAnyRole("ADMIN", "TEACHER")
 
                 // ── Μαθήματα + Αίθουσες: mutations μόνο ADMIN ────────────
                 .requestMatchers(HttpMethod.POST,   "/api/courses/**", "/api/rooms/**").hasRole("ADMIN")
@@ -53,32 +82,17 @@ public class SecurityConfig {
                 // ── Καθηγητές ─────────────────────────────────────────────
                 .requestMatchers(HttpMethod.POST,   "/api/teachers/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/teachers/**").hasRole("ADMIN")
+                // TEACHER επιτρέπεται PUT, αλλά ο controller ελέγχει ownership
+                // (μπορεί να επεξεργαστεί ΜΟΝΟ τον δικό του φάκελο/διαθεσιμότητα).
                 .requestMatchers(HttpMethod.PUT,    "/api/teachers/**").hasAnyRole("ADMIN", "TEACHER")
-
-                // ── Ωρολόγια — ADMIN-only actions (πιο ειδικά πρώτα) ─────
-                // Δημοσίευση / Απόσυρση: μόνο ADMIN
-                .requestMatchers(HttpMethod.PUT, "/api/timetables/*/publish").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.PUT, "/api/timetables/*/unpublish").hasRole("ADMIN")
-                // Δημιουργία νέου ωρολογίου: μόνο ADMIN
-                .requestMatchers(HttpMethod.POST, "/api/timetables").hasRole("ADMIN")
-                // Solver / auto-schedule: μόνο ADMIN
-                .requestMatchers(HttpMethod.POST, "/api/timetables/*/solve").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.POST, "/api/timetables/*/auto-schedule").hasRole("ADMIN")
-                // Διαγραφή ωρολογίου: μόνο ADMIN
-                .requestMatchers(HttpMethod.DELETE, "/api/timetables/*").hasRole("ADMIN")
-
-                // ── Ωρολόγια — ADMIN + TEACHER (αναθέσεις drag & drop) ───
-                // Διαγραφή assignment: ADMIN + TEACHER
-                .requestMatchers(HttpMethod.DELETE, "/api/timetables/assignments/**").hasAnyRole("ADMIN", "TEACHER")
-                // Δημιουργία / Μετακίνηση assignment: ADMIN + TEACHER
-                .requestMatchers(HttpMethod.POST,   "/api/timetables/**").hasAnyRole("ADMIN", "TEACHER")
-                .requestMatchers(HttpMethod.PUT,    "/api/timetables/**").hasAnyRole("ADMIN", "TEACHER")
-                .requestMatchers(HttpMethod.DELETE, "/api/timetables/**").hasAnyRole("ADMIN", "TEACHER")
 
                 // ── Χρονοθυρίδες: mutations μόνο ADMIN ───────────────────
                 .requestMatchers(HttpMethod.POST,   "/api/timeslots/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT,    "/api/timeslots/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/timeslots/**").hasRole("ADMIN")
+
+                // ── Ανάγνωση: όλοι οι συνδεδεμένοι ──────────────────────
+                .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
 
                 // ── Οτιδήποτε άλλο: συνδεδεμένος χρήστης ────────────────
                 .anyRequest().authenticated()
@@ -93,10 +107,12 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(
-            "http://localhost:5173",
-            "http://localhost:3000"
-        ));
+        config.setAllowedOrigins(
+            Arrays.stream(allowedOrigins.split(","))
+                  .map(String::trim)
+                  .filter(s -> !s.isBlank())
+                  .toList()
+        );
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
