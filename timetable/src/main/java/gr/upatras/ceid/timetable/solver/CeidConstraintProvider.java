@@ -27,6 +27,9 @@ public class CeidConstraintProvider implements ConstraintProvider {
         // HARD — διαθεσιμότητα καθηγητών
         teacherBlockedSlot(factory),
 
+        // HARD — δεσμευμένες ώρες αιθουσών
+        roomBlockedSlot(factory),
+
         // SOFT
         roomCapacityMatch(factory),
         preferNormalHours(factory),
@@ -151,6 +154,14 @@ public class CeidConstraintProvider implements ConstraintProvider {
                 .filter(TeacherAvailabilityConstraints::isBlocked)
                 .penalize(HardSoftScore.ofHard(10))
                 .asConstraint("Teacher blocked slot");
+    }
+
+    /** HARD: Η αίθουσα δεν διατίθεται σε δεσμευμένες ώρες (room_constraints). */
+    Constraint roomBlockedSlot(ConstraintFactory factory) {
+        return factory.forEach(Lesson.class)
+                .filter(RoomAvailabilityConstraints::isBlockedWeekly)
+                .penalize(HardSoftScore.ofHard(10))
+                .asConstraint("Room blocked slot");
     }
 
     // SOFT

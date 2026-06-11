@@ -86,6 +86,10 @@ function ExamCard({
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
         <div style={{ fontWeight: 700, fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', color }}>
           {assignment.course?.code}
+          {assignment.course?.visibleInTimetable === false && (
+            <span title="Σε συνεννόηση — δεν εμφανίζεται στο δημόσιο πρόγραμμα"
+                  style={{ marginLeft: 4, fontSize: '10px' }}>🤝</span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '3px' }}>
           <button

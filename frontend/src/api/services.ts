@@ -13,7 +13,20 @@ import type {
   GenerateExamSlotsResult,
 } from '../types';
 
+/** Δεσμευμένη ώρα αίθουσας (room_constraints). */
+export interface RoomConstraintDto {
+  id?: number;
+  dayOfWeek: string;
+  hour: number;
+  constraintType: 'BLOCKED';
+}
+
 export const roomService = {
+  getConstraints: (id: number) =>
+    api.get<RoomConstraintDto[]>(`/rooms/${id}/constraints`),
+
+  updateConstraints: (id: number, body: RoomConstraintDto[]) =>
+    api.put(`/rooms/${id}/constraints`, body),
   getAll: () => api.get<Room[]>('/rooms'),
   getById: (id: number) => api.get<Room>(`/rooms/${id}`),
   create: (room: Partial<Room>) => api.post<Room>('/rooms', room),
@@ -115,7 +128,7 @@ export const timetableService = {
     api.post<GenerateExamSlotsResult>('/timetables/generate-exam-slots', data),
 
   generateExamSlotsForTimetable: (id: number) =>
-    api.get(`/timetables/${id}/generate-exam-slots`),
+    api.post(`/timetables/${id}/generate-exam-slots`, {}),
 };
 
 export const healthService = {

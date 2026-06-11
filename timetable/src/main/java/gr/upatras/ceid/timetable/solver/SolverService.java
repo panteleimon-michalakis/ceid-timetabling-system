@@ -6,6 +6,8 @@ import ai.timefold.solver.core.config.solver.SolverConfig;
 import ai.timefold.solver.core.api.score.buildin.hardsoft.HardSoftScore;
 import gr.upatras.ceid.timetable.entity.*;
 import gr.upatras.ceid.timetable.entity.TeacherConstraint;
+import gr.upatras.ceid.timetable.entity.RoomConstraint;
+import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import gr.upatras.ceid.timetable.repository.*;
 import org.springframework.stereotype.Service;
 
@@ -25,12 +27,14 @@ public class SolverService {
     private final TimetableAssignmentRepository assignmentRepo;
     private final CourseTeacherRepository courseTeacherRepo;
     private final TeacherConstraintRepository constraintRepo;
+    private final RoomConstraintRepository roomConstraintRepo;
 
     public SolverService(CourseRepository courseRepo, RoomRepository roomRepo,
                          TimeSlotRepository timeSlotRepo, TimetableRepository timetableRepo,
                          TimetableAssignmentRepository assignmentRepo,
                          CourseTeacherRepository courseTeacherRepo,
-                         TeacherConstraintRepository constraintRepo) {
+                         TeacherConstraintRepository constraintRepo,
+                         RoomConstraintRepository roomConstraintRepo) {
         this.courseRepo = courseRepo;
         this.roomRepo = roomRepo;
         this.timeSlotRepo = timeSlotRepo;
@@ -38,6 +42,7 @@ public class SolverService {
         this.assignmentRepo = assignmentRepo;
         this.courseTeacherRepo = courseTeacherRepo;
         this.constraintRepo = constraintRepo;
+        this.roomConstraintRepo = roomConstraintRepo;
     }
 
     public Map<String, Object> solve(Long timetableId, int timeLimitSeconds) {
@@ -141,8 +146,10 @@ public void generateExamSlotsForTimetable(Timetable timetable) {
         throw new IllegalArgumentException("Το endDate δεν μπορεί να είναι πριν από το startDate.");
     }
 
+    // Ρεαλιστικά παράθυρα εξετάσεων του τμήματος: 9-12, 12-15, 15-18, 18-21.
+    // (Ίδια με το μαζικό generate-exam-slots endpoint.)
     List<LocalTime> examStartTimes = new java.util.ArrayList<>();
-    for (int h = 9; h <= 20; h++) {
+    for (int h : new int[]{9, 12, 15, 18}) {
         examStartTimes.add(LocalTime.of(h, 0));
     }
 
@@ -534,6 +541,7 @@ private String hardScoreName(HardSoftScore score) {
 }
 
 private void loadConstraintsFromDb() {
+        loadRoomConstraintsFromDb();
         TeacherAvailabilityRegistry.load();
 
         List<TeacherConstraint> dbConstraints = constraintRepo.findAllWithTeacher();
@@ -569,6 +577,17 @@ private void loadConstraintsFromDb() {
 
         TeacherAvailabilityConstraints.BLOCKED_SLOTS   = Collections.unmodifiableMap(blocked);
         TeacherAvailabilityConstraints.PREFERRED_SLOTS = Collections.unmodifiableMap(preferred);
+    }
+
+    /** Φορτώνει τις δεσμευμένες ώρες αιθουσών από τη ΒΔ στο registry του solver. */
+    private void loadRoomConstraintsFromDb() {
+        Map<String, Set<String>> blocked = new HashMap<>();
+        for (RoomConstraint c : roomConstraintRepo.findAllWithRoom()) {
+            if (c.getConstraintType() != RoomConstraint.ConstraintType.BLOCKED) continue;
+            blocked.computeIfAbsent(c.getRoom().getCode(), k -> new HashSet<>())
+                   .add(c.getDayOfWeek() + "_" + c.getHour());
+        }
+        RoomAvailabilityConstraints.BLOCKED_SLOTS = Collections.unmodifiableMap(blocked);
     }
 
 }

@@ -1603,6 +1603,10 @@ function AssignmentCard({
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
         <div style={{ fontWeight: 800, fontSize: '0.78rem' }}>
           {assignment.course?.code}
+          {assignment.course?.visibleInTimetable === false && (
+            <span title="Σε συνεννόηση — δεν εμφανίζεται στο δημόσιο πρόγραμμα"
+                  style={{ marginLeft: 5, fontSize: '0.7rem' }}>🤝</span>
+          )}
         </div>
 
        <div style={{ display: 'flex', gap: '0.2rem' }}>

@@ -26,6 +26,7 @@ public Constraint[] defineConstraints(ConstraintFactory factory) {
     return new Constraint[]{
             // HARD
             teacherConflict(factory),
+            roomBlockedSlot(factory),
             requiredSameYearSameDay(factory),
 
             // SOFT
@@ -78,6 +79,17 @@ Constraint requiredSameYearSameDay(ConstraintFactory factory) {
             .penalize(HardSoftScore.ofHard(5))
             .asConstraint("Required same-year exams on same day");
 }
+
+    /**
+     * HARD: Η αίθουσα δεν διατίθεται σε δεσμευμένες ώρες (room_constraints).
+     * Τα exam slots είναι 3ωρα — ελέγχεται όλο το παράθυρο.
+     */
+    Constraint roomBlockedSlot(ConstraintFactory factory) {
+        return factory.forEach(Lesson.class)
+                .filter(RoomAvailabilityConstraints::isBlockedExam)
+                .penalize(HardSoftScore.ofHard(10))
+                .asConstraint("Exam room blocked slot");
+    }
 
     // ===================== SOFT =====================
 

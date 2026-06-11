@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { roomService } from '../api/services';
+import { roomService, type RoomConstraintDto } from '../api/services';
 import { useAuth } from '../context/AuthContext';
 import type { Room } from '../types';
 
@@ -58,6 +58,130 @@ const S = `
 .btn-primary{padding:8px 20px;border:none;border-radius:8px;background:#1d4ed8;color:#fff;font-weight:600;cursor:pointer;font-size:13px;font-family:'IBM Plex Sans',sans-serif;}
 .btn-secondary{padding:8px 20px;border:none;border-radius:8px;background:#1a2744;color:#94a3b8;font-weight:600;cursor:pointer;font-size:13px;font-family:'IBM Plex Sans',sans-serif;}
 `;
+
+// ─── Availability (δεσμευμένες ώρες) ─────────────────────────────────────────
+
+const DAYS = ['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY'];
+const DAY_SHORT: Record<string,string> = {
+  MONDAY:'Δευ', TUESDAY:'Τρί', WEDNESDAY:'Τετ', THURSDAY:'Πέμ', FRIDAY:'Παρ',
+};
+const HOURS = [9,10,11,12,13,14,15,16,17,18,19,20];
+
+function ConstraintsModal({ room, onClose, onSaved }: {
+  room: Room; onClose: () => void; onSaved: () => void;
+}) {
+  const [blocked, setBlocked] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState(false);
+  const [dirty,   setDirty]   = useState(false);
+  const [error,   setError]   = useState('');
+
+  useEffect(() => {
+    roomService.getConstraints(room.id)
+      .then(r => setBlocked(new Set(r.data.map(c => `${c.dayOfWeek}_${c.hour}`))))
+      .catch(() => setError('Σφάλμα φόρτωσης δεσμευμένων ωρών.'))
+      .finally(() => setLoading(false));
+  }, [room.id]);
+
+  function toggle(day: string, hour: number) {
+    const key = `${day}_${hour}`;
+    setBlocked(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+    setDirty(true);
+  }
+
+  async function save() {
+    setSaving(true);
+    setError('');
+    try {
+      const body: RoomConstraintDto[] = [...blocked].map(key => {
+        const idx = key.lastIndexOf('_');
+        return {
+          dayOfWeek: key.slice(0, idx),
+          hour: parseInt(key.slice(idx + 1), 10),
+          constraintType: 'BLOCKED' as const,
+        };
+      });
+      await roomService.updateConstraints(room.id, body);
+      setDirty(false);
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      setError(e?.response?.data?.error ?? 'Σφάλμα αποθήκευσης.');
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 560 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-title">Δεσμευμένες ώρες — {room.code}</div>
+        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+          Κλικ στα κελιά για ώρες που η αίθουσα <b>δεν</b> διατίθεται
+          (π.χ. χρήση από άλλο τμήμα). Ισχύει για εβδομαδιαία προγράμματα και εξεταστική.
+        </div>
+        {loading ? (
+          <div style={{ color:'#334155', fontSize:13, padding:24, textAlign:'center' }}>Φόρτωση…</div>
+        ) : (
+          <table style={{ borderCollapse:'collapse', width:'100%' }}>
+            <thead>
+              <tr>
+                <th style={{ width:44 }}></th>
+                {DAYS.map(d => (
+                  <th key={d} style={{ padding:'4px 0', fontSize:11, color:'#94a3b8', fontWeight:500 }}>
+                    {DAY_SHORT[d]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {HOURS.map(h => (
+                <tr key={h}>
+                  <td style={{ fontFamily:'JetBrains Mono, monospace', fontSize:10, color:'#475569',
+                               textAlign:'right', paddingRight:8 }}>{h}:00</td>
+                  {DAYS.map(d => {
+                    const isBlocked = blocked.has(`${d}_${h}`);
+                    return (
+                      <td key={d} style={{ padding:2 }}>
+                        <button
+                          onClick={() => toggle(d, h)}
+                          title={isBlocked ? 'Δεσμευμένη — κλικ για αποδέσμευση' : 'Διαθέσιμη — κλικ για δέσμευση'}
+                          style={{
+                            width:'100%', height:24, border:'1px solid',
+                            borderColor: isBlocked ? '#7f1d1d' : '#1a2744',
+                            borderRadius:4, cursor:'pointer',
+                            background: isBlocked ? '#7f1d1d55' : '#080f1a',
+                            color: isBlocked ? '#f87171' : '#1e293b',
+                            fontSize:10, fontFamily:'JetBrains Mono, monospace',
+                          }}>
+                          {isBlocked ? '✕' : ''}
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:16 }}>
+          <div style={{ fontSize:11, color:'#475569' }}>
+            {blocked.size} δεσμευμένες ώρες
+            {error && <span style={{ color:'#f87171', marginLeft:10 }}>{error}</span>}
+          </div>
+          <div style={{ display:'flex', gap:10 }}>
+            <button className="btn-secondary" onClick={onClose}>Ακύρωση</button>
+            <button className="btn-primary" onClick={save} disabled={saving || !dirty}>
+              {saving ? 'Αποθήκευση…' : 'Αποθήκευση'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Room Modal ───────────────────────────────────────────────────────────────
 
@@ -157,6 +281,7 @@ export default function Rooms() {
   const [filter,  setFilter]  = useState('ALL');
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Partial<Room> | false>(false);
+  const [editingConstraints, setEditingConstraints] = useState<Room | null>(null);
   const [toast,   setToast]   = useState('');
 
   function load() {
@@ -178,7 +303,10 @@ export default function Rooms() {
       await roomService.delete(r.id);
       setToast('Η αίθουσα διαγράφηκε.');
       load();
-    } catch { setToast('Σφάλμα διαγραφής.'); }
+    } catch (err: any) {
+      setToast(err?.response?.data?.error
+        ?? 'Σφάλμα διαγραφής. Η αίθουσα μπορεί να χρησιμοποιείται σε προγράμματα.');
+    }
   }
 
   const filtered = filter === 'ALL' ? rooms : rooms.filter(r => r.roomType === filter);
@@ -236,6 +364,12 @@ export default function Rooms() {
                     <div className="rm-type-badge">{tc.label}</div>
                     {isAdmin && (
                       <div style={{ display:'flex', gap:4, marginTop:2 }}>
+                        <button onClick={() => setEditingConstraints(r)}
+                          title="Δεσμευμένες ώρες αίθουσας"
+                          style={{ padding:'2px 8px', border:'none', borderRadius:4, background:'#78350f',
+                            color:'#fbbf24', cursor:'pointer', fontSize:10, fontFamily:"'IBM Plex Sans',sans-serif" }}>
+                          Ώρες
+                        </button>
                         <button onClick={() => setEditing(r)}
                           style={{ padding:'2px 8px', border:'none', borderRadius:4, background:'#1e3a5f',
                             color:'#60a5fa', cursor:'pointer', fontSize:10, fontFamily:"'IBM Plex Sans',sans-serif" }}>
@@ -267,6 +401,14 @@ export default function Rooms() {
             );
           })}
         </div>
+      )}
+
+      {editingConstraints && (
+        <ConstraintsModal
+          room={editingConstraints}
+          onClose={() => setEditingConstraints(null)}
+          onSaved={() => setToast(`Οι δεσμευμένες ώρες της ${editingConstraints.code} αποθηκεύτηκαν.`)}
+        />
       )}
 
       {editing !== false && (

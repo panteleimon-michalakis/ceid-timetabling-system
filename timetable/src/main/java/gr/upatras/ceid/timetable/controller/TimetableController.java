@@ -3,6 +3,8 @@ package gr.upatras.ceid.timetable.controller;
 import gr.upatras.ceid.timetable.entity.*;
 import gr.upatras.ceid.timetable.repository.*;
 import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
+import gr.upatras.ceid.timetable.entity.RoomConstraint;
+import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,7 +35,9 @@ public TimetableController(TimetableRepository timetableRepo,
                            RoomRepository roomRepo,
                            TimeSlotRepository timeSlotRepo,
                            CourseTeacherRepository courseTeacherRepo,
+                           RoomConstraintRepository roomConstraintRepo,
                            gr.upatras.ceid.timetable.solver.SolverService solverService) {
+    this.roomConstraintRepo = roomConstraintRepo;
     this.timetableRepo = timetableRepo;
     this.assignmentRepo = assignmentRepo;
     this.courseRepo = courseRepo;
@@ -42,6 +46,8 @@ public TimetableController(TimetableRepository timetableRepo,
     this.courseTeacherRepo = courseTeacherRepo;
     this.solverService = solverService;
 }
+
+private final RoomConstraintRepository roomConstraintRepo;
 
     @GetMapping
     public List<Timetable> getAll(org.springframework.security.core.Authentication auth) {
@@ -1503,6 +1509,13 @@ private boolean isExamTimetable(Timetable timetable) {
         return badRequest("Η ανάθεση έχει ελλιπή δεδομένα.");
     }
 
+    // Δεσμευμένες ώρες αίθουσας (room_constraints) — κανόνας εξεταστικής #5,
+    // ισχύει σε όλα τα μονοπάτια: προσθήκη, μετακίνηση, auto-schedule.
+    String roomBlockedMsg = roomBlockedMessage(room, timeSlot);
+    if (roomBlockedMsg != null) {
+        return badRequest(roomBlockedMsg);
+    }
+
     boolean examTimetable = isExamTimetable(timetable);
     boolean examAssignment = assignmentType == TimetableAssignment.AssignmentType.EXAM;
 
@@ -2050,6 +2063,11 @@ if (examTimetable
             reasons.add("Το μάθημα ανήκει σε άλλο εξάμηνο");
         }
 
+        // Δεσμευμένες ώρες αίθουσας
+        if (roomBlockedMessage(room, timeSlot) != null) {
+            reasons.add("Η αίθουσα είναι δεσμευμένη αυτή την ώρα");
+        }
+
         // Κανόνας τμήματος: στην εξεταστική επιτρέπεται μοίρασμα αίθουσας,
         // οπότε η κατειλημμένη αίθουσα μπλοκάρει μόνο εβδομαδιαία προγράμματα.
         if (timetable.getTimetableType() != Timetable.TimetableType.EXAM) {
@@ -2509,6 +2527,33 @@ private List<String> sortTeacherDisplayNames(Collection<String> names) {
     // DTO HELPERS
     // =========================================================
 
+    /**
+     * Επιστρέφει μήνυμα σφάλματος αν η αίθουσα είναι δεσμευμένη σε
+     * οποιαδήποτε ώρα του slot (room_constraints), αλλιώς null.
+     * Καλύπτει 1ωρα εβδομαδιαία slots και 3ωρα exam slots.
+     */
+    private String roomBlockedMessage(Room room, TimeSlot timeSlot) {
+        if (room == null || timeSlot == null || timeSlot.getDayOfWeek() == null
+                || timeSlot.getStartTime() == null || timeSlot.getEndTime() == null) {
+            return null;
+        }
+        List<RoomConstraint> constraints = roomConstraintRepo.findByRoomId(room.getId());
+        if (constraints.isEmpty()) return null;
+
+        String day = timeSlot.getDayOfWeek().name();
+        int startHour = timeSlot.getStartTime().getHour();
+        int endHour = Math.max(startHour + 1, timeSlot.getEndTime().getHour());
+
+        for (RoomConstraint c : constraints) {
+            if (c.getConstraintType() != RoomConstraint.ConstraintType.BLOCKED) continue;
+            if (day.equals(c.getDayOfWeek()) && c.getHour() >= startHour && c.getHour() < endHour) {
+                return "Η αίθουσα " + room.getCode() + " είναι δεσμευμένη "
+                        + c.getDayOfWeek() + " στις " + c.getHour() + ":00.";
+            }
+        }
+        return null;
+    }
+
     private Map<String, Object> assignmentToDto(TimetableAssignment assignment) {
     Map<String, Object> dto = new LinkedHashMap<>();
 
@@ -2822,7 +2867,7 @@ public ResponseEntity<?> generateExamSlots(@RequestBody Map<String, String> body
     return ResponseEntity.ok(result);
 }
 
-@GetMapping("/{id}/generate-exam-slots")
+@PostMapping("/{id}/generate-exam-slots")
 public ResponseEntity<?> generateExamSlotsForTimetable(@PathVariable Long id) {
     Timetable timetable = timetableRepo.findById(id).orElse(null);
     if (timetable == null) return ResponseEntity.notFound().build();
