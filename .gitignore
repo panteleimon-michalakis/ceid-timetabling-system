@@ -38,3 +38,9 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+
+#Codes
+DB_PASSWORD=postgre190
+
+JWT_SECRET=11112222333344445555666677778888
