@@ -1,0 +1,40 @@
+# CEID Timetabling System — πλήρες stack με ένα: docker compose up --build
+# Απαιτεί αρχείο .env δίπλα στο compose με: DB_PASSWORD=..., JWT_SECRET=...
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ceid_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ceid_timetable
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ceid_admin -d ceid_timetable"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./timetable
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/ceid_timetable
+      DB_USERNAME: ceid_admin
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: http://localhost
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
