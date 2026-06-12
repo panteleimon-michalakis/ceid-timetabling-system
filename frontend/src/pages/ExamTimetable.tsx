@@ -351,6 +351,20 @@ export default function ExamTimetable() {
     )?.id;
   }
 
+  /** Επιστρέφει το slot id για (date, hour) — αν δεν υπάρχει, το δημιουργεί on-demand. */
+  async function resolveOrCreateSlotId(date: string, hour: string): Promise<number | undefined> {
+    const existing = getExamSlotId(date, hour);
+    if (existing) return existing;
+    try {
+      const res = await timetableService.findOrCreateExamSlot(date, parseInt(hour, 10));
+      setExamTimeSlots(prev => [...prev, res.data as unknown as TimeSlot]);
+      return res.data.id;
+    } catch (err: any) {
+      setError(err?.response?.data?.error || 'Αδυναμία δημιουργίας χρονοθυρίδας.');
+      return undefined;
+    }
+  }
+
   function getAssignmentsAt(date: string, hour: string): TimetableAssignment[] {
     return assignments.filter(a =>
       a.timeSlot.specificDate === date && normalizeTime(a.timeSlot.startTime) === hour
@@ -379,8 +393,8 @@ export default function ExamTimetable() {
 
   async function submitAdd() {
     if (!selectedId || !selectedCourseId || !selectedRoomId) return;
-    const slotId = getExamSlotId(addDate, addHour);
-    if (!slotId) { setError('Δεν βρέθηκε χρονοθυρίδα.'); return; }
+    const slotId = await resolveOrCreateSlotId(addDate, addHour);
+    if (!slotId) return;
     setSaving(true);
     try {
       await timetableService.addAssignment(selectedId, {
@@ -442,8 +456,8 @@ export default function ExamTimetable() {
 
   async function handleExamDrop(date: string, hour: string) {
     if (!draggingAssignment || !selectedId) return;
-    const slotId = getExamSlotId(date, hour);
-    if (!slotId) return;
+    const slotId = await resolveOrCreateSlotId(date, hour);
+    if (!slotId) { setDraggingAssignment(null); return; }
     // Κανόνας τμήματος: στην εξεταστική επιτρέπεται μοίρασμα αίθουσας,
     // οπότε η μετακίνηση κρατά την αίθουσα της εξέτασης.
     let roomId = draggingAssignment.room?.id ?? 0;
@@ -790,17 +804,17 @@ export default function ExamTimetable() {
                             return (
                               <td
                                 key={date}
-                                onClick={() => !draggingAssignment && slotExists && openAddModal(date, hour)}
+                                onClick={() => !draggingAssignment && openAddModal(date, hour)}
                                 onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                 onDrop={e => { e.preventDefault(); handleExamDrop(date, hour); }}
                                 title={
                                   hint === 'allowed' ? 'Επιτρεπτή τοποθέτηση' :
                                   hint === 'blocked' ? 'Μη επιτρεπτή τοποθέτηση' :
-                                  slotExists ? 'Κλικ για προσθήκη' : ''
+                                  slotExists ? 'Κλικ για προσθήκη' : 'Κλικ για προσθήκη (θα δημιουργηθεί χρονοθυρίδα)'
                                 }
                                 style={{
                                   ...tdStyle,
-                                  cursor: slotExists ? 'pointer' : 'default',
+                                  cursor: 'pointer',
                                   background:
                                     hint === 'allowed' ? '#052e16' :
                                     hint === 'blocked' ? '#1c0a0a' :
@@ -812,7 +826,7 @@ export default function ExamTimetable() {
                                 }}
                               >
                                 {!slotExists ? (
-                                  <span style={{ color: '#1e293b', fontSize: '10px' }}>—</span>
+                                  <span style={{ color: '#16263d', fontSize: '11px' }}>+ Προσθήκη</span>
                                 ) : cellAssignments.length === 0 ? (
                                   <span style={{ color: '#1e3a5f', fontSize: '11px' }}>+ Προσθήκη</span>
                                 ) : (

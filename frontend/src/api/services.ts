@@ -104,6 +104,11 @@ export const timetableService = {
   clearAssignments: (id: number) =>
     api.delete(`/timetables/${id}/assignments`),
 
+  /** Επιστρέφει υπάρχον EXAM slot για (ημερομηνία, ώρα) ή το δημιουργεί (ADMIN/TEACHER). */
+  findOrCreateExamSlot: (date: string, startHour: number) =>
+    api.post<{ id: number; dayOfWeek: string; startTime: string; endTime: string; slotType: string; specificDate: string }>(
+      `/timetables/exam-slots/find-or-create`, { date, startHour }),
+
   moveAssignment: (assignmentId: number, data: { roomId?: number; timeSlotId?: number }) =>
     api.put<TimetableAssignment>(`/timetables/assignments/${assignmentId}/move`, data),
 

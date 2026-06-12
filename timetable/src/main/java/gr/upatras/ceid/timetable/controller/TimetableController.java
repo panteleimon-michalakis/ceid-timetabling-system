@@ -2528,6 +2528,56 @@ private List<String> sortTeacherDisplayNames(Collection<String> names) {
     // =========================================================
 
     /**
+     * Επιστρέφει το EXAM slot για συγκεκριμένη ημερομηνία/ώρα έναρξης,
+     * δημιουργώντας το on-demand αν δεν υπάρχει — ώστε ADMIN/TEACHER να
+     * μπορούν να προσθέτουν εξέταση σε οποιοδήποτε κελί του πλέγματος.
+     * Δικαιώματα: POST /api/timetables/** = ADMIN, TEACHER (SecurityConfig).
+     */
+    @PostMapping("/exam-slots/find-or-create")
+    public ResponseEntity<?> findOrCreateExamSlot(@RequestBody Map<String, Object> body) {
+        Object dateRaw = body.get("date");
+        Object hourRaw = body.get("startHour");
+        if (dateRaw == null || !(hourRaw instanceof Number hourNum)) {
+            return badRequest("Απαιτούνται πεδία date και startHour.");
+        }
+        java.time.LocalDate date;
+        try {
+            date = java.time.LocalDate.parse(String.valueOf(dateRaw));
+        } catch (Exception ex) {
+            return badRequest("Μη έγκυρη ημερομηνία: " + dateRaw);
+        }
+        int hour = hourNum.intValue();
+        if (hour < 8 || hour > 20) {
+            return badRequest("Η ώρα έναρξης πρέπει να είναι μεταξύ 08:00 και 20:00.");
+        }
+        java.time.LocalTime start = java.time.LocalTime.of(hour, 0);
+
+        List<TimeSlot> existing = timeSlotRepo.findBySlotTypeAndSpecificDateAndStartTime(
+                TimeSlot.SlotType.EXAM, date, start);
+        TimeSlot slot;
+        if (!existing.isEmpty()) {
+            slot = existing.get(0);
+        } else {
+            slot = timeSlotRepo.save(TimeSlot.builder()
+                    .slotType(TimeSlot.SlotType.EXAM)
+                    .specificDate(date)
+                    .dayOfWeek(date.getDayOfWeek())
+                    .startTime(start)
+                    .endTime(java.time.LocalTime.of(Math.min(hour + 3, 23), 0))
+                    .build());
+        }
+
+        Map<String, Object> dto = new java.util.HashMap<>();
+        dto.put("id", slot.getId());
+        dto.put("dayOfWeek", slot.getDayOfWeek() != null ? slot.getDayOfWeek().name() : null);
+        dto.put("startTime", String.valueOf(slot.getStartTime()));
+        dto.put("endTime", String.valueOf(slot.getEndTime()));
+        dto.put("slotType", slot.getSlotType().name());
+        dto.put("specificDate", String.valueOf(slot.getSpecificDate()));
+        return ResponseEntity.ok(dto);
+    }
+
+    /**
      * Επιστρέφει μήνυμα σφάλματος αν η αίθουσα είναι δεσμευμένη σε
      * οποιαδήποτε ώρα του slot (room_constraints), αλλιώς null.
      * Καλύπτει 1ωρα εβδομαδιαία slots και 3ωρα exam slots.
