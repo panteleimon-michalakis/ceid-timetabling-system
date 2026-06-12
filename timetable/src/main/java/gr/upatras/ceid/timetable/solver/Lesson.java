@@ -81,6 +81,18 @@ public class Lesson {
     public java.util.Set<String> getTeacherKeys() { return teacherKeys; }
     public void setTeacherKeys(java.util.Set<String> teacherKeys) { this.teacherKeys = teacherKeys; }
 
+    // A6: Προτιμήσεις εξεταστικής — κενά σύνολα = καμία προτίμηση.
+    private java.util.Set<String> preferredRoomCodes = java.util.Set.of();
+    private java.util.Set<Integer> preferredStartHours = java.util.Set.of();
+
+    public java.util.Set<String> getPreferredRoomCodes() { return preferredRoomCodes; }
+    public void setPreferredRoomCodes(java.util.Set<String> v) { this.preferredRoomCodes = v != null ? v : java.util.Set.of(); }
+    public java.util.Set<Integer> getPreferredStartHours() { return preferredStartHours; }
+    public void setPreferredStartHours(java.util.Set<Integer> v) { this.preferredStartHours = v != null ? v : java.util.Set.of(); }
+
+    public boolean hasRoomPreference() { return !preferredRoomCodes.isEmpty(); }
+    public boolean hasHourPreference() { return !preferredStartHours.isEmpty(); }
+
     public int getSemester() { return semester; }
     public void setSemester(int semester) { this.semester = semester; }
 

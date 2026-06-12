@@ -87,6 +87,8 @@ public class CourseController {
             course.setTeachersText(normalizeTeachersTextForDto(updated.getTeachersText()));
             course.setActive(updated.getActive());
             course.setVisibleInTimetable(updated.getVisibleInTimetable());
+            course.setPreferredExamRooms(updated.getPreferredExamRooms());
+            course.setPreferredExamHours(updated.getPreferredExamHours());
             course.setNotes(updated.getNotes());
 
             Course saved = courseRepo.save(course);
@@ -126,6 +128,8 @@ public class CourseController {
         dto.put("teachersText", normalizeTeachersTextForDto(course.getTeachersText()));
         dto.put("active", course.getActive());
         dto.put("visibleInTimetable", course.getVisibleInTimetable());
+        dto.put("preferredExamRooms", course.getPreferredExamRooms());
+        dto.put("preferredExamHours", course.getPreferredExamHours());
         dto.put("notes", course.getNotes());
 
         return dto;

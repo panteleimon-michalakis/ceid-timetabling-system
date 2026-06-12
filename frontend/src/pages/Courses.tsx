@@ -58,6 +58,7 @@ const EMPTY_COURSE: Partial<Course> = {
   courseType: 'REQUIRED', lectureHours: 3, tutorialHours: 2, labHours: 0,
   ects: 6, sector: 'ΕΒ', semesterType: 'FALL', expectedStudents: 0,
   teachersText: '', active: true, visibleInTimetable: true,
+  preferredExamRooms: '', preferredExamHours: '',
 };
 
 // ─── Course Modal ─────────────────────────────────────────────────────────────
@@ -168,6 +169,21 @@ function CourseModal({ course, onClose, onSaved }: {
               <option value="true">Ναι</option>
               <option value="false">Όχι</option>
             </select>
+          </div>
+        </div>
+
+        <div className="form-row" style={{ marginTop: 10 }}>
+          <div style={{ flex: 1 }}>
+            <label className="form-label">Προτιμώμενες αίθουσες εξέτασης (CSV)</label>
+            <input className="form-input" placeholder="π.χ. Β,Δ1"
+              value={form.preferredExamRooms ?? ''}
+              onChange={e => set('preferredExamRooms', e.target.value)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="form-label">Προτιμώμενες ώρες εξέτασης (CSV)</label>
+            <input className="form-input" placeholder="π.χ. 9,12"
+              value={form.preferredExamHours ?? ''}
+              onChange={e => set('preferredExamHours', e.target.value)} />
           </div>
         </div>
 

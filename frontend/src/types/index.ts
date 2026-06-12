@@ -54,6 +54,10 @@ export interface Course {
   teachersText: string;
   active?: boolean;
   visibleInTimetable?: boolean;
+  /** A6: Προτιμώμενες αίθουσες εξέτασης (CSV κωδικών, π.χ. "Β,Δ1"). */
+  preferredExamRooms?: string | null;
+  /** A6: Προτιμώμενες ώρες έναρξης εξέτασης (CSV από 9/12/15/18, π.χ. "9,12"). */
+  preferredExamHours?: string | null;
   examDurationMinutes?: number | null;
   notes?: string | null;
 }

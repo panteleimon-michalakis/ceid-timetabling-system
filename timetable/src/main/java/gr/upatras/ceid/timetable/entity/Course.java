@@ -86,6 +86,14 @@ public class Course {
     @Column(name = "visible_in_timetable", nullable = false)
     private Boolean visibleInTimetable;
 
+    // A6: Προτιμήσεις εξεταστικής από τις φόρμες διδασκόντων.
+    // CSV κωδικών αιθουσών (π.χ. "Β,Δ1") και ωρών έναρξης (π.χ. "9,12").
+    @Column(length = 200)
+    private String preferredExamRooms;
+
+    @Column(length = 50)
+    private String preferredExamHours;
+
     // Σημειώσεις
     @Column(columnDefinition = "TEXT")
     private String notes;

@@ -263,6 +263,8 @@ private List<SolverRoom> buildSolverRooms(Timetable timetable) {
                 Lesson l = new Lesson(lessonId++, course.getId(), course.getCode(), course.getName(),
                         course.getStudyYear(), cType, "EXAM", students, semType, sem);
                 l.setTeacherKeys(teacherKeyMap.getOrDefault(course.getId(), Set.of()));
+                l.setPreferredRoomCodes(parseCsvCodes(course.getPreferredExamRooms()));
+                l.setPreferredStartHours(parseCsvHours(course.getPreferredExamHours()));
                 lessons.add(l);
             } else {
                 // Semester: αφαίρεσε τα ήδη manual-placed από τις απαιτούμενες ώρες
@@ -296,6 +298,27 @@ private List<SolverRoom> buildSolverRooms(Timetable timetable) {
 
         return lessons;
     }
+
+/** A6: "Β, Δ1" -> {"Β","Δ1"} */
+private static java.util.Set<String> parseCsvCodes(String csv) {
+    if (csv == null || csv.isBlank()) return java.util.Set.of();
+    java.util.Set<String> out = new java.util.HashSet<>();
+    for (String part : csv.split("[,;]")) {
+        String p = part.trim();
+        if (!p.isEmpty()) out.add(p);
+    }
+    return out;
+}
+
+/** A6: "9, 12" -> {9, 12} — αγνοεί μη αριθμητικές τιμές. */
+private static java.util.Set<Integer> parseCsvHours(String csv) {
+    if (csv == null || csv.isBlank()) return java.util.Set.of();
+    java.util.Set<Integer> out = new java.util.HashSet<>();
+    for (String part : csv.split("[,;]")) {
+        try { out.add(Integer.parseInt(part.trim())); } catch (NumberFormatException ignored) { }
+    }
+    return out;
+}
 
 private boolean isCourseRelevant(Course course, Timetable timetable) {
     if (course == null || timetable == null) return false;

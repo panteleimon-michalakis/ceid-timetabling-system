@@ -35,6 +35,8 @@ public Constraint[] defineConstraints(ConstraintFactory factory) {
             dailyLoadBalance(factory),
             preferDistinctRoomsWithinSlot(factory),
             requiredBeforeElectives(factory),
+            preferredExamRoom(factory),
+            preferredExamHour(factory),
             spreadSameYear(factory),
             directionGroupADifferentDays(factory),
             teacherMultipleExamsSameDay(factory),
@@ -92,6 +94,30 @@ Constraint requiredSameYearSameDay(ConstraintFactory factory) {
     }
 
     // ===================== SOFT =====================
+
+    /**
+     * A6 SOFT(4): Προτιμώμενη αίθουσα εξέτασης (φόρμες διδασκόντων).
+     * Ποινή όταν το μάθημα έχει δηλωμένες προτιμήσεις και τοποθετηθεί
+     * σε αίθουσα εκτός λίστας. Βάρος 4: χαμηλότερα από τους κανόνες
+     * τμήματος sameYearSameDay(6) και direction(5), ψηλότερα από όλα
+     * τα tie-breakers (teacher/day 2, load/distinct 1).
+     */
+    Constraint preferredExamRoom(ConstraintFactory factory) {
+        return factory.forEach(Lesson.class)
+                .filter(l -> l.getRoom() != null && l.hasRoomPreference()
+                        && !l.getPreferredRoomCodes().contains(l.getRoom().getCode()))
+                .penalize(HardSoftScore.ofSoft(4))
+                .asConstraint("Preferred exam room");
+    }
+
+    /** A6 SOFT(4): Προτιμώμενη ώρα έναρξης εξέτασης (9/12/15/18). */
+    Constraint preferredExamHour(ConstraintFactory factory) {
+        return factory.forEach(Lesson.class)
+                .filter(l -> l.getTimeSlot() != null && l.hasHourPreference()
+                        && !l.getPreferredStartHours().contains(l.getTimeSlot().getStartHour()))
+                .penalize(HardSoftScore.ofSoft(4))
+                .asConstraint("Preferred exam start hour");
+    }
 
 
     /**
