@@ -46,7 +46,13 @@ public class SecurityConfig {
 
                 // ── Δημόσια endpoints ─────────────────────────────────────
                 .requestMatchers("/api/auth/**").permitAll()
+
                 .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
+
+                // Τεκμηρίωση API (Swagger UI / OpenAPI JSON)
+
+                .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+
 
                 // ── Διαχείριση χρηστών ────────────────────────────────────
                 // Αλλαγή δικού μου κωδικού: κάθε συνδεδεμένος χρήστης.
