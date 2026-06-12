@@ -753,6 +753,11 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
             return false;
         }
 
+        // Ευθυγράμμιση με τον solver: μόνο τα υποχρεωτικά μετράνε στο μεσημεριανό.
+        if (course.getCourseType() != Course.CourseType.REQUIRED) {
+            return false;
+        }
+
         if (candidateTimeSlot.getDayOfWeek() == null || candidateTimeSlot.getStartTime() == null) {
             return false;
         }
@@ -790,6 +795,10 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
             boolean sameDay = existingSlot.getDayOfWeek().equals(candidateTimeSlot.getDayOfWeek());
 
             if (!sameStudyYear || !sameDay) {
+                continue;
+            }
+
+            if (assignment.getCourse().getCourseType() != Course.CourseType.REQUIRED) {
                 continue;
             }
 
@@ -2758,6 +2767,9 @@ private int getRequiredHoursForAssignmentType(
 
         for (TimetableAssignment a : assignments) {
             if (a.getCourse() == null || a.getTimeSlot() == null) continue;
+            // Ευθυγράμμιση με τον solver: το μεσημεριανό κενό αφορά τα
+            // υποχρεωτικά του έτους — τα επιλογής είναι προαιρετική παρακολούθηση.
+            if (a.getCourse().getCourseType() != Course.CourseType.REQUIRED) continue;
             if (a.getCourse().getStudyYear() != studyYear) continue;
             if (a.getTimeSlot().getDayOfWeek() != day) continue;
 
