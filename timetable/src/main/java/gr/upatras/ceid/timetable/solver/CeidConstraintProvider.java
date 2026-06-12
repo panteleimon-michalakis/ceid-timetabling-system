@@ -4,6 +4,7 @@ import ai.timefold.solver.core.api.score.buildin.hardsoft.HardSoftScore;
 import ai.timefold.solver.core.api.score.stream.Constraint;
 import ai.timefold.solver.core.api.score.stream.ConstraintFactory;
 import ai.timefold.solver.core.api.score.stream.ConstraintProvider;
+import ai.timefold.solver.core.api.score.stream.ConstraintCollectors;
 import ai.timefold.solver.core.api.score.stream.Joiners;
 import static ai.timefold.solver.core.api.score.stream.ConstraintCollectors.count;
 import static ai.timefold.solver.core.api.score.stream.ConstraintCollectors.countDistinct;
@@ -35,6 +36,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
         preferNormalHours(factory),
         avoidOverloadedDay(factory),
         teacherPreferredSlot(factory),
+        requiredSameYearGaps(factory),
 
 	directionGroupAConflict(factory),
         };
@@ -154,6 +156,54 @@ public class CeidConstraintProvider implements ConstraintProvider {
                 .filter(TeacherAvailabilityConstraints::isBlocked)
                 .penalize(HardSoftScore.ofHard(10))
                 .asConstraint("Teacher blocked slot");
+    }
+
+    /**
+     * SOFT (κανόνας τμήματος #1): Τα υποχρεωτικά μαθήματα του ίδιου έτους να
+     * μην αφήνουν κενά στο ημερήσιο πρόγραμμα — και ειδικά όχι κενά άνω των
+     * 2 ωρών. Μετρώνται Θεωρίες/Φροντιστήρια· τα εργαστήρια εξαιρούνται,
+     * γιατί γίνονται σε τμήματα και δεν ορίζουν το κοινό πρόγραμμα του έτους.
+     * Ποινή: 2/ώρα κενού + επιπλέον 4/ώρα πέρα από το όριο των 2 ωρών.
+     * Αθροιζόμενη σε όλες τις μέρες, αποθαρρύνει και τα πολλά κενά/εβδομάδα.
+     */
+    Constraint requiredSameYearGaps(ConstraintFactory factory) {
+        return factory.forEach(Lesson.class)
+                .filter(l -> l.getTimeSlot() != null
+                        && l.isRequired()
+                        && (l.isLecture() || l.isTutorial()))
+                .groupBy(Lesson::getStudyYear,
+                         l -> l.getTimeSlot().getDayOfWeek(),
+                         ConstraintCollectors.toList())
+                .penalize(HardSoftScore.ONE_SOFT,
+                        (studyYear, day, lessons) -> dailyGapPenalty(lessons))
+                .asConstraint("Required same-year daily gaps");
+    }
+
+    /** Ποινή κενών μίας ημέρας για τα μαθήματα ενός έτους (1ωρα weekly slots). */
+    static int dailyGapPenalty(java.util.List<Lesson> lessons) {
+        boolean[] occupied = new boolean[24];
+        int min = 24, max = -1;
+        for (Lesson l : lessons) {
+            int h = l.getTimeSlot().getStartHour();
+            if (h < 0 || h > 23) continue;
+            occupied[h] = true;
+            if (h < min) min = h;
+            if (h > max) max = h;
+        }
+        if (max <= min) return 0;
+        int penalty = 0;
+        int gap = 0;
+        for (int h = min; h <= max; h++) {
+            if (occupied[h]) {
+                if (gap > 0) {
+                    penalty += 2 * gap + (gap > 2 ? 4 * (gap - 2) : 0);
+                    gap = 0;
+                }
+            } else {
+                gap++;
+            }
+        }
+        return penalty;
     }
 
     /** HARD: Η αίθουσα δεν διατίθεται σε δεσμευμένες ώρες (room_constraints). */
