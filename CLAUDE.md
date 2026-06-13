@@ -86,9 +86,20 @@ A) ~~Διάγνωση «6 validation errors με 0 hard» (NewEarino)~~ — ΔΙ
    hardcoded TeacherAvailabilityRegistry — `teacher_constraints` κενός, βλ.
    task #4). ΕΓΙΝΕ fix ενός δευτερεύοντος bug: το validation διπλομετρούσε
    SAME_COURSE_SAME_SLOT και ως TEACHER_CONFLICT (commit fix(validation), νέο
-   TimetableControllerValidationTest). ΕΚΚΡΕΜΕΙ (χωριστά): (i) διερεύνηση
-   εφικτότητας/solve-time για τα co-taught μαθήματα· (ii) προαιρετικά η ενοποίηση
-   normalizers σε TeacherNameUtil ως καθαρό DRY refactor (ΔΕΝ είναι bug fix).
+   TimetableControllerValidationTest).
+   ΑΝΑΛΥΣΗ ΕΦΙΚΤΟΤΗΤΑΣ (2026-06-14): τα co-taught είναι ΔΟΜΙΚΑ ΑΔΥΝΑΤΑ. Κακλαμάνης
+   διαθέσιμος μόνο 15–20, Παπαϊωάννου μόνο 9–16 → κοινό παράθυρο μόλις 15:00 &
+   16:00 = 10 slots/εβδ. Τα 3 μαθήματα (lec+tut+lab) = 16 ώρες που κληρονομούν
+   ΚΑΙ ΟΙ ΔΥΟ τα teacher keys → 16 ώρες σε 10 slots ⇒ pigeonhole ≥6 αναπόφευκτες
+   συγκρούσεις (= το παρατηρούμενο hardScore -6). Περισσότερος solve-time δεν
+   βοηθά (δεν υπάρχει zero-hard λύση). ΛΥΣΗ (μοχλός A): lab/tut να ΜΗΝ κληρονομούν
+   τον καθηγητή (μόνο θεωρίες δεσμεύουν → 7 ώρες ≤ 10 = εφικτό), αλλά απαιτεί
+   δεδομένο «ποιος τρέχει tut/lab» (το 68 έχει ήδη teacher «Εντεταλμένος Διδάσκων»)
+   → συνδέεται με task #4. Data smell: τα preferred slots Κακλαμάνη/Παπαϊωάννου
+   (THURSDAY_18/19, FRIDAY_19/20) είναι ΕΚΤΟΣ του δικού τους hard-blocked
+   παραθύρου → νεκρές προτιμήσεις, καθάρισμα μαζί με task #4.
+   ΕΚΚΡΕΜΕΙ (χωριστά): προαιρετικά η ενοποίηση normalizers σε TeacherNameUtil ως
+   καθαρό DRY refactor (ΔΕΝ είναι bug fix).
 B) ~~Tests για A6 constraints~~ — ΕΓΙΝΕ (47/47, βλ. ExamConstraintProviderTest).
 C) Refactor: TimetableController (~2900 γραμμές) → ValidationService,
    PlacementService, ExamSlotService. Καμία αλλαγή συμπεριφοράς — τα tests κριτής.
