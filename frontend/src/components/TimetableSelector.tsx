@@ -28,8 +28,21 @@ export default function TimetableSelector({
   const [newSemesterType, setNewSemesterType] = useState('FALL');
   const [startDate,       setStartDate]       = useState('');
   const [endDate,         setEndDate]         = useState('');
+  const [excludedDates,   setExcludedDates]   = useState<string[]>([]);
+  const [excludedInput,   setExcludedInput]   = useState('');
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+
+  function addExcludedDate() {
+    const d = excludedInput;
+    if (!d) return;
+    setExcludedDates(prev => prev.includes(d) ? prev : [...prev, d].sort());
+    setExcludedInput('');
+  }
+
+  function removeExcludedDate(d: string) {
+    setExcludedDates(prev => prev.filter(x => x !== d));
+  }
 
   const currentAcademicYear = (() => {
     const now = new Date();
@@ -57,6 +70,7 @@ export default function TimetableSelector({
       if (timetableType === 'EXAM') {
         payload.startDate = startDate;
         payload.endDate   = endDate;
+        payload.excludedDates = excludedDates.join(','); // CSV — οι αργίες εξαιρούνται αυτόματα από το backend
       }
       const res = await timetableService.create(payload);
       onCreated(res.data);
@@ -64,6 +78,8 @@ export default function TimetableSelector({
       setNewName('');
       setStartDate('');
       setEndDate('');
+      setExcludedDates([]);
+      setExcludedInput('');
     } catch {
       setError('Σφάλμα κατά τη δημιουργία.');
     } finally {
@@ -162,6 +178,53 @@ export default function TimetableSelector({
               {saving ? '...' : 'Δημιουργία'}
             </button>
           </div>
+
+          {timetableType === 'EXAM' && (
+            <div style={{ marginTop: '0.25rem' }}>
+              <label style={labelStyle}>Εξαιρούμενες ημερομηνίες (προαιρετικά)</label>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input
+                  type="date"
+                  value={excludedInput}
+                  min={startDate || undefined}
+                  max={endDate || undefined}
+                  onChange={e => setExcludedInput(e.target.value)}
+                  style={{ ...inputStyle, marginBottom: 0, width: '180px' }}
+                />
+                <button
+                  type="button"
+                  onClick={addExcludedDate}
+                  disabled={!excludedInput}
+                  style={{ ...primaryBtnStyle, padding: '0.5rem 0.85rem', opacity: excludedInput ? 1 : 0.5 }}
+                >
+                  + Προσθήκη
+                </button>
+                <span style={{ color: '#64748b', fontSize: '0.78rem' }}>
+                  Οι επίσημες αργίες εξαιρούνται αυτόματα.
+                </span>
+              </div>
+              {excludedDates.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '0.6rem' }}>
+                  {excludedDates.map(d => (
+                    <span
+                      key={d}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#1a2744', color: '#cbd5e1', borderRadius: '6px', padding: '3px 8px', fontSize: '0.75rem', fontFamily: 'JetBrains Mono, monospace' }}
+                    >
+                      {d}
+                      <button
+                        type="button"
+                        onClick={() => removeExcludedDate(d)}
+                        title="Αφαίρεση"
+                        style={{ border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem', lineHeight: 1, padding: 0 }}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

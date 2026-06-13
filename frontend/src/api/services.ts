@@ -75,6 +75,7 @@ export const timetableService = {
     startDate?: string | null;
     endDate?: string | null;
     notes?: string | null;
+    excludedDates?: string | null; // CSV YYYY-MM-DD — custom εξαιρούμενες ημερομηνίες
   }) => api.post<Timetable>('/timetables', data),
   update: (id: number, data: Partial<Timetable>) =>
     api.put<Timetable>(`/timetables/${id}`, data),
