@@ -19,6 +19,9 @@
 
 ## Εντολές (Windows)
 
+Το backend (`mvnw.cmd`, `pom.xml`) βρίσκεται στο nested path `timetable\timetable\`
+σε σχέση με το repo root — όλες οι `mvnw.cmd` εντολές τρέχουν από εκεί.
+
 Backend (από `timetable/`):
 - Build: `mvnw.cmd clean compile` · Tests: `mvnw.cmd test` (θέλει PostgreSQL up
   + env var `DB_PASSWORD`) · Run: `mvnw.cmd spring-boot:run` (port 8080)
