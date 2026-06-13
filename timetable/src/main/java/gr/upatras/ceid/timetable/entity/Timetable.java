@@ -47,7 +47,7 @@ public class Timetable {
     // Εξαιρούμενες ημερομηνίες που ορίζει ο admin (custom) — δεν παράγονται exam
     // slots σε αυτές. Οι επίσημες ελληνικές αργίες εξαιρούνται ξεχωριστά, μέσω
     // GreekHolidays (δεν αποθηκεύονται εδώ).
-    @ElementCollection
+    @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "timetable_excluded_dates",
             joinColumns = @JoinColumn(name = "timetable_id"))
     @Column(name = "excluded_date")
