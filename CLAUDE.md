@@ -112,9 +112,19 @@ B) ~~Tests για A6 constraints~~ — ΕΓΙΝΕ (47/47, βλ. ExamConstraintPr
 C) Refactor: TimetableController (~2900 γραμμές) → ValidationService,
    PlacementService, ExamSlotService. Καμία αλλαγή συμπεριφοράς — τα tests κριτής.
    Κράτα μετρικές πριν/μετά (γραμμές/κλάση) για 📝 thesis.
-D) A12: εξαιρούμενες ημερομηνίες/αργίες στη δημιουργία exam slots (UI πεδίο +
-   προσυμπληρωμένες ελληνικές αργίες — έχουν βρεθεί εξετάσεις σε
-   Πρωτοχρονιά/Θεοφάνια).
+D) ~~A12: εξαιρούμενες ημερομηνίες/αργίες στη δημιουργία exam slots~~ — ΕΓΙΝΕ
+   (2026-06-14). Νέο `util/GreekHolidays` (authoritative): σταθερές αργίες ως
+   MonthDay + κινητές βάσει Ορθόδοξου Πάσχα (Meeus computus + 13 ημέρες, ΟΧΙ
+   hardcoded ανά έτος) — πάντα εξαιρούνται. Custom εξαιρέσεις admin: νέο πεδίο
+   `Timetable.excludedDates` (@ElementCollection `timetable_excluded_dates`),
+   ορίζονται κατά τη δημιουργία (UI `TimetableSelector`, CSV→backend). Φίλτρο στις
+   ΔΥΟ διαδρομές παραγωγής (`SolverService.generateExamSlotsForTimetable` = η
+   πραγματική του UI, + batch `/generate-exam-slots`): `!weekend && !isPublicHoliday
+   && !excluded`. Καμία αλλαγή solver/constraint (αν δεν υπάρχει slot, δεν
+   τοποθετείται εξέταση). Tests: `GreekHolidaysTest` (7) + 3 για `parseExcludedDates`
+   → 61/61 πράσινα. Schema: ddl-auto=update τώρα· note για μελλοντικό Flyway
+   migration του `timetable_excluded_dates` (κανόνας #5). ΕΚΤΟΣ scope (follow-ups):
+   cleanup ήδη-αποθηκευμένων slots σε αργίες· ανά-αργία toggle.
 E) Διασταύρωση δεδομένων: ονόματα/κωδικοί μαθημάτων & καθηγητών του DataSeeder
    και της DB vs `docs/official/` — ΠΡΩΤΑ αναφορά αποκλίσεων, μετά διορθώσεις
    κατόπιν έγκρισης.
