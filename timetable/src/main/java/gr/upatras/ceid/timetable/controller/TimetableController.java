@@ -5,6 +5,7 @@ import gr.upatras.ceid.timetable.repository.*;
 import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
 import gr.upatras.ceid.timetable.entity.RoomConstraint;
 import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
+import gr.upatras.ceid.timetable.util.GreekHolidays;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.transaction.annotation.Transactional;
@@ -148,6 +149,10 @@ public ResponseEntity<?> create(@RequestBody Map<String, String> body) {
         }
     }
 
+    // Προαιρετικές custom εξαιρούμενες ημερομηνίες (CSV YYYY-MM-DD). Οι επίσημες
+    // ελληνικές αργίες εξαιρούνται αυτόματα στην παραγωγή slots (GreekHolidays).
+    List<LocalDate> excludedDates = parseExcludedDates(body.get("excludedDates"));
+
     Timetable t = Timetable.builder()
             .name(name)
             .academicYear(body.getOrDefault("academicYear", "2025-26"))
@@ -155,12 +160,36 @@ public ResponseEntity<?> create(@RequestBody Map<String, String> body) {
             .semesterType(semesterType)
             .startDate(startDate)
             .endDate(endDate)
+            .excludedDates(excludedDates)
             .status(Timetable.Status.DRAFT)
             .createdAt(LocalDateTime.now())
             .build();
 
     return ResponseEntity.ok(timetableRepo.save(t));
 }
+
+    /**
+     * Parse-άρει CSV ISO ημερομηνιών (YYYY-MM-DD) σε λίστα {@link LocalDate}.
+     * Ανεκτικό: null/κενό → κενή λίστα· κενά ή μη έγκυρα τμήματα αγνοούνται.
+     */
+    static List<LocalDate> parseExcludedDates(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return new ArrayList<>();
+        }
+        List<LocalDate> dates = new ArrayList<>();
+        for (String part : csv.split(",")) {
+            String s = part.trim();
+            if (s.isEmpty()) {
+                continue;
+            }
+            try {
+                dates.add(LocalDate.parse(s));
+            } catch (Exception ignored) {
+                // αγνοούμε μη έγκυρες ημερομηνίες — δεν μπλοκάρουμε τη δημιουργία
+            }
+        }
+        return dates;
+    }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
@@ -2860,6 +2889,9 @@ public ResponseEntity<?> generateExamSlots(@RequestBody Map<String, String> body
 
     int[] examHours = {9, 12, 15, 18};
 
+    // Custom εξαιρέσεις (CSV). Οι επίσημες αργίες εξαιρούνται ξεχωριστά παρακάτω.
+    Set<LocalDate> excluded = new HashSet<>(parseExcludedDates(body.get("excludedDates")));
+
     List<Map<String, Object>> slots = new ArrayList<>();
     int createdCount = 0;
     int reusedCount = 0;
@@ -2870,7 +2902,9 @@ public ResponseEntity<?> generateExamSlots(@RequestBody Map<String, String> body
     while (!current.isAfter(endDate)) {
         DayOfWeek dow = current.getDayOfWeek();
 
-        if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) {
+        if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY
+                && !GreekHolidays.isPublicHoliday(current)
+                && !excluded.contains(current)) {
             for (int hour : examHours) {
                 LocalTime startTime = LocalTime.of(hour, 0);
                 LocalTime endTime = LocalTime.of(hour + 3, 0);

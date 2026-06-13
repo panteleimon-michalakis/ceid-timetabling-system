@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "timetables")
@@ -41,6 +43,16 @@ public class Timetable {
 
     @Column(name = "end_date")
     private LocalDate endDate;
+
+    // Εξαιρούμενες ημερομηνίες που ορίζει ο admin (custom) — δεν παράγονται exam
+    // slots σε αυτές. Οι επίσημες ελληνικές αργίες εξαιρούνται ξεχωριστά, μέσω
+    // GreekHolidays (δεν αποθηκεύονται εδώ).
+    @ElementCollection
+    @CollectionTable(name = "timetable_excluded_dates",
+            joinColumns = @JoinColumn(name = "timetable_id"))
+    @Column(name = "excluded_date")
+    @Builder.Default
+    private List<LocalDate> excludedDates = new ArrayList<>();
 
     // Κατάσταση προγράμματος
     @Enumerated(EnumType.STRING)

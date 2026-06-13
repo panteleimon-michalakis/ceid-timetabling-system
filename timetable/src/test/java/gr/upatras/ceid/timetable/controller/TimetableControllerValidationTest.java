@@ -3,6 +3,10 @@ package gr.upatras.ceid.timetable.controller;
 import gr.upatras.ceid.timetable.entity.Course;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -45,5 +49,28 @@ class TimetableControllerValidationTest {
         assertFalse(TimetableController.isSameCourseId(null, course(31L)));
         assertFalse(TimetableController.isSameCourseId(course(31L), null));
         assertFalse(TimetableController.isSameCourseId(null, null));
+    }
+
+    // ---------- parseExcludedDates (custom εξαιρέσεις admin) ----------
+
+    @Test
+    void parseExcludedDates_parsesCsvOfIsoDates() {
+        assertEquals(
+                List.of(LocalDate.of(2026, 1, 15), LocalDate.of(2026, 2, 3)),
+                TimetableController.parseExcludedDates("2026-01-15,2026-02-03"));
+    }
+
+    @Test
+    void parseExcludedDates_trimsAndSkipsBlankAndInvalid() {
+        // Κενά τμήματα και μη έγκυρες ημερομηνίες αγνοούνται· τα υπόλοιπα παραμένουν.
+        assertEquals(
+                List.of(LocalDate.of(2026, 1, 15)),
+                TimetableController.parseExcludedDates(" 2026-01-15 , , not-a-date "));
+    }
+
+    @Test
+    void parseExcludedDates_emptyForNullOrBlank() {
+        assertTrue(TimetableController.parseExcludedDates(null).isEmpty());
+        assertTrue(TimetableController.parseExcludedDates("   ").isEmpty());
     }
 }
