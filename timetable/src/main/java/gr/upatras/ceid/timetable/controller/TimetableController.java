@@ -1146,9 +1146,12 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
                         && a.getTimeSlot() != null && b.getTimeSlot() != null
                         && a.getTimeSlot().getId().equals(b.getTimeSlot().getId())) {
 
-                    if (a.getCourse().getId() != null
-                            && b.getCourse().getId() != null
-                            && a.getCourse().getId().equals(b.getCourse().getId())) {
+                    if (isSameCourseId(a.getCourse(), b.getCourse())) {
+                        // Ίδιο μάθημα δύο φορές στο ίδιο slot: αναφέρεται ΜΟΝΟ ως
+                        // SAME_COURSE_SAME_SLOT. Δεν είναι TEACHER_CONFLICT — αλλιώς
+                        // διπλομετριέται (κάθε μάθημα "μοιράζεται" τους διδάσκοντές
+                        // του με τον εαυτό του). Mirror του guard
+                        // !a.getCourseId().equals(b.getCourseId()) στον teacherConflict.
                         errors.add(validationIssue(
                                 "ERROR",
                                 "SAME_COURSE_SAME_SLOT",
@@ -1156,22 +1159,22 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
                                         + a.getCourse().getName() + ".",
                                 a.getId()
                         ));
-                    }
+                    } else {
+                        List<String> commonTeacherNames = findCommonTeacherNamesSmart(a.getCourse(), b.getCourse());
 
-                    List<String> commonTeacherNames = findCommonTeacherNamesSmart(a.getCourse(), b.getCourse());
+                        if (!commonTeacherNames.isEmpty()) {
+                            String teacherText = String.join(", ", commonTeacherNames);
 
-                    if (!commonTeacherNames.isEmpty()) {
-                        String teacherText = String.join(", ", commonTeacherNames);
-
-                        errors.add(validationIssue(
-                                "ERROR",
-                                "TEACHER_CONFLICT",
-                                "Σύγκρουση διδάσκοντα: " + teacherText
-                                        + " έχει δύο μαθήματα την ίδια ώρα: "
-                                        + a.getCourse().getName() + " και "
-                                        + b.getCourse().getName() + ".",
-                                a.getId()
-                        ));
+                            errors.add(validationIssue(
+                                    "ERROR",
+                                    "TEACHER_CONFLICT",
+                                    "Σύγκρουση διδάσκοντα: " + teacherText
+                                            + " έχει δύο μαθήματα την ίδια ώρα: "
+                                            + a.getCourse().getName() + " και "
+                                            + b.getCourse().getName() + ".",
+                                    a.getId()
+                            ));
+                        }
                     }
                 }
 
@@ -2226,6 +2229,18 @@ private Map<Long, Set<String>> buildCourseTeacherKeyMap(List<Course> courses) {
         }
 
         return false;
+    }
+
+    /**
+     * Δύο assignments ανήκουν στο ΙΔΙΟ μάθημα (ίδιο, μη-null id). Χρησιμοποιείται
+     * ώστε η ταυτόχρονη τοποθέτηση του ίδιου μαθήματος να αναφέρεται μόνο ως
+     * SAME_COURSE_SAME_SLOT και όχι (διπλά) ως TEACHER_CONFLICT — αντικατοπτρίζει
+     * τον guard του {@code teacherConflict} στον CeidConstraintProvider.
+     */
+    static boolean isSameCourseId(Course a, Course b) {
+        return a != null && b != null
+                && a.getId() != null && b.getId() != null
+                && a.getId().equals(b.getId());
     }
 
     private List<String> findCommonTeacherNamesSmart(Course firstCourse, Course secondCourse) {
