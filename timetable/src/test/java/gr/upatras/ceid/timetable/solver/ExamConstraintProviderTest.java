@@ -192,6 +192,39 @@ class ExamConstraintProviderTest {
                 .given(required, elective).penalizesBy(1);
     }
 
+    // ---------- A6: Προτιμήσεις διδασκόντων (φόρμες) ----------
+
+    @Test
+    void preferredExamRoom_outsidePreferenceListPenalized() {
+        Lesson l = exam(1, "C1", 2, "REQUIRED", 100, examSlot(10, "2026-09-01", 9), D1, "T1|A");
+        l.setPreferredRoomCodes(java.util.Set.of("Β", "Γ"));
+        verifier.verifyThat(ExamConstraintProvider::preferredExamRoom)
+                .given(l).penalizesBy(1); // 1 match (βάρος constraint = ofSoft(4))
+    }
+
+    @Test
+    void preferredExamRoom_withinPreferenceNotPenalized() {
+        Lesson l = exam(1, "C1", 2, "REQUIRED", 100, examSlot(10, "2026-09-01", 9), BETA, "T1|A");
+        l.setPreferredRoomCodes(java.util.Set.of("Β", "Γ"));
+        verifier.verifyThat(ExamConstraintProvider::preferredExamRoom)
+                .given(l).penalizesBy(0);
+    }
+
+    @Test
+    void preferredExamRoom_noPreferenceNeverPenalized() {
+        Lesson l = exam(1, "C1", 2, "REQUIRED", 100, examSlot(10, "2026-09-01", 9), D1, "T1|A");
+        verifier.verifyThat(ExamConstraintProvider::preferredExamRoom)
+                .given(l).penalizesBy(0);
+    }
+
+    @Test
+    void preferredExamHour_outsidePreferencePenalized() {
+        Lesson l = exam(1, "C1", 2, "REQUIRED", 100, examSlot(10, "2026-09-01", 15), BETA, "T1|A");
+        l.setPreferredStartHours(java.util.Set.of(9, 12));
+        verifier.verifyThat(ExamConstraintProvider::preferredExamHour)
+                .given(l).penalizesBy(1); // 1 match (βάρος constraint = ofSoft(4))
+    }
+
     @Test
     void requiredBeforeElectives_correctOrderNotPenalized() {
         Lesson required = exam(1, "C1", 2, "REQUIRED", 100, examSlot(10, "2026-09-01", 9), BETA, "T1|A");
