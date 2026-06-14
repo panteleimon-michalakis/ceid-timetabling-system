@@ -10,6 +10,7 @@ import gr.upatras.ceid.timetable.entity.RoomConstraint;
 import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import gr.upatras.ceid.timetable.repository.*;
 import gr.upatras.ceid.timetable.util.GreekHolidays;
+import gr.upatras.ceid.timetable.util.ExamDateRules;
 import org.springframework.stereotype.Service;
 
 import java.time.DayOfWeek;
@@ -101,6 +102,13 @@ private List<SolverTimeSlot> buildSolverTimeSlots(Timetable timetable) {
             ? TimeSlot.SlotType.EXAM
             : TimeSlot.SlotType.SEMESTER;
 
+    // Custom εξαιρέσεις του προγράμματος (οι επίσημες αργίες ελέγχονται ξεχωριστά).
+    // Τα exam slots είναι κοινόχρηστα: παλιά slots σε αργία/εξαίρεση από άλλο
+    // πρόγραμμα δεν πρέπει να μπαίνουν στο value range αυτού του solve.
+    Set<LocalDate> excluded = new HashSet<>(
+            timetable.getExcludedDates() != null
+                    ? timetable.getExcludedDates() : List.of());
+
     for (TimeSlot ts : timeSlotRepo.findBySlotType(requiredSlotType)) {
         if (examTimetable) {
             if (ts.getSpecificDate() == null) {
@@ -114,6 +122,10 @@ private List<SolverTimeSlot> buildSolverTimeSlots(Timetable timetable) {
 
             if (timetable.getEndDate() != null
                     && ts.getSpecificDate().isAfter(timetable.getEndDate())) {
+                continue;
+            }
+
+            if (ExamDateRules.isExcludedExamDate(ts.getSpecificDate(), excluded)) {
                 continue;
             }
         }
