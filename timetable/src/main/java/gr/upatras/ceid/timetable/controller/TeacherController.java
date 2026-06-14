@@ -61,9 +61,21 @@ public class TeacherController {
 
     // ── Basic CRUD ──────────────────────────────────────────────────────────
 
+    /**
+     * Σταθερή σειρά: βαθμίδα κατά enum ordinal (PROFESSOR → ... → APPOINTED,
+     * δηλ. καθηγητές πρώτα, εντεταλμένοι τελευταίοι), μετά όνομα, μετά id.
+     * Ταξινόμηση in-memory επειδή το teacherType αποθηκεύεται ως EnumType.STRING
+     * (η DB δεν εγγυάται ordinal σειρά).
+     */
     @GetMapping
     public List<Teacher> getAll() {
-        return teacherRepo.findAll();
+        return teacherRepo.findAll().stream()
+                .sorted(Comparator
+                        .comparingInt((Teacher t) -> t.getTeacherType() == null
+                                ? Integer.MAX_VALUE : t.getTeacherType().ordinal())
+                        .thenComparing(Teacher::getName, Comparator.nullsLast(String::compareTo))
+                        .thenComparing(Teacher::getId))
+                .toList();
     }
 
     @GetMapping("/{id}")

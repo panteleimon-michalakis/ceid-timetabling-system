@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -62,9 +63,20 @@ public class RoomController {
         return ResponseEntity.ok(Map.of("saved", toSave.size()));
     }
 
+    /**
+     * Σταθερή σειρά: τύπος αίθουσας κατά enum ordinal
+     * (AMPHITHEATER → CLASSROOM → LAB → MEETING_ROOM → EXAM_HALL), μετά όνομα.
+     * Ταξινόμηση in-memory επειδή το roomType αποθηκεύεται ως EnumType.STRING
+     * (η DB δεν εγγυάται ordinal σειρά).
+     */
     @GetMapping
     public List<Room> getAll() {
-        return roomRepo.findAll();
+        return roomRepo.findAll().stream()
+                .sorted(Comparator
+                        .comparingInt((Room r) -> r.getRoomType() == null
+                                ? Integer.MAX_VALUE : r.getRoomType().ordinal())
+                        .thenComparing(Room::getName, Comparator.nullsLast(String::compareTo)))
+                .toList();
     }
 
     @GetMapping("/{id}")

@@ -6,6 +6,7 @@ import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
 import gr.upatras.ceid.timetable.entity.RoomConstraint;
 import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import gr.upatras.ceid.timetable.util.ExamDateRules;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,10 +56,12 @@ private final RoomConstraintRepository roomConstraintRepo;
         boolean isAdminOrTeacher = auth != null && auth.getAuthorities().stream()
             .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN")
                        || a.getAuthority().equals("ROLE_TEACHER"));
+        // Σταθερή σειρά: νεότερα προγράμματα πρώτα (createdAt DESC, id DESC tiebreaker)
+        Sort sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
         if (isAdminOrTeacher) {
-            return timetableRepo.findAll();
+            return timetableRepo.findAll(sort);
         }
-        return timetableRepo.findByStatus(Timetable.Status.PUBLISHED);
+        return timetableRepo.findByStatus(Timetable.Status.PUBLISHED, sort);
     }
 
     @GetMapping("/{id}")

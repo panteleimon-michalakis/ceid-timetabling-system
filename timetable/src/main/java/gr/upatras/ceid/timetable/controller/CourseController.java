@@ -2,6 +2,7 @@ package gr.upatras.ceid.timetable.controller;
 
 import gr.upatras.ceid.timetable.entity.Course;
 import gr.upatras.ceid.timetable.repository.CourseRepository;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +13,9 @@ import java.util.*;
 @RequestMapping("/api/courses")
 public class CourseController {
 
+    /** Σταθερή σειρά εμφάνισης μαθημάτων: έτος → εξάμηνο → κωδικός (code unique). */
+    private static final Sort COURSE_SORT = Sort.by("studyYear", "semester", "code");
+
     private final CourseRepository courseRepo;
 
     public CourseController(CourseRepository courseRepo) {
@@ -20,7 +24,7 @@ public class CourseController {
 
     @GetMapping
     public List<Map<String, Object>> getAll() {
-        return courseRepo.findAll().stream()
+        return courseRepo.findAll(COURSE_SORT).stream()
                 .map(this::courseToDto)
                 .toList();
     }
@@ -34,28 +38,28 @@ public class CourseController {
 
     @GetMapping("/semester/{semester}")
     public List<Map<String, Object>> getBySemester(@PathVariable Integer semester) {
-        return courseRepo.findBySemesterAndActiveTrue(semester).stream()
+        return courseRepo.findBySemesterAndActiveTrue(semester, COURSE_SORT).stream()
                 .map(this::courseToDto)
                 .toList();
     }
 
     @GetMapping("/year/{year}")
     public List<Map<String, Object>> getByYear(@PathVariable Integer year) {
-        return courseRepo.findByStudyYear(year).stream()
+        return courseRepo.findByStudyYear(year, COURSE_SORT).stream()
                 .map(this::courseToDto)
                 .toList();
     }
 
     @GetMapping("/type/{type}")
     public List<Map<String, Object>> getByType(@PathVariable Course.CourseType type) {
-        return courseRepo.findByCourseType(type).stream()
+        return courseRepo.findByCourseType(type, COURSE_SORT).stream()
                 .map(this::courseToDto)
                 .toList();
     }
 
     @GetMapping("/active")
     public List<Map<String, Object>> getActive() {
-        return courseRepo.findByActiveTrue().stream()
+        return courseRepo.findByActiveTrue(COURSE_SORT).stream()
                 .map(this::courseToDto)
                 .toList();
     }
