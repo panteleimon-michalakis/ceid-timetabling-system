@@ -17,7 +17,7 @@ export default function LoginPage() {
     setError('');
     try {
       await login(username, password);
-      navigate('/');
+      navigate('/dashboard');
     } catch {
       setError('Λάθος username ή κωδικός.');
     } finally {
@@ -118,44 +118,6 @@ export default function LoginPage() {
             {loading ? 'Σύνδεση...' : 'Σύνδεση'}
           </button>
         </form>
-
-        {/* Demo credentials panel — ορατό ΜΟΝΟ σε development mode (npm run dev).
-            Κρύβεται αυτόματα στο production build (npm run build). */}
-        {import.meta.env.DEV && (
-          <div style={{
-            marginTop: 24, padding: '12px 14px',
-            background: '#080f1a', borderRadius: 8, border: '1px solid #1a2744',
-          }}>
-            <div style={{ fontSize: 10, color: '#475569', fontFamily: 'JetBrains Mono, monospace',
-              textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 8 }}>
-              Demo Accounts (dev only)
-            </div>
-            {[
-              { u: 'admin',   p: 'admin123',   r: 'ADMIN',   c: '#3b82f6' },
-              { u: 'teacher', p: 'teacher123', r: 'TEACHER', c: '#10b981' },
-              { u: 'student', p: 'student123', r: 'STUDENT', c: '#8b5cf6' },
-            ].map(a => (
-              <div key={a.u}
-                onClick={() => { setUsername(a.u); setPassword(a.p); }}
-                style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '5px 0', cursor: 'pointer', borderBottom: '1px solid #0f1f38',
-                }}>
-                <span style={{ fontSize: 12, color: '#94a3b8', fontFamily: 'JetBrains Mono, monospace' }}>
-                  {a.u} / {a.p}
-                </span>
-                <span style={{
-                  fontSize: 9, padding: '2px 7px', borderRadius: 3,
-                  background: `${a.c}22`, color: a.c, fontWeight: 600,
-                  fontFamily: 'JetBrains Mono, monospace',
-                }}>{a.r}</span>
-              </div>
-            ))}
-            <div style={{ fontSize: 10, color: '#334155', marginTop: 6 }}>
-              Κλικ για αυτόματη συμπλήρωση
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
