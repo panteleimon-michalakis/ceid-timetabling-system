@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const ALL_NAV_LINKS = [
-  { to: '/',          label: 'Επισκόπηση',  icon: '⊞', roles: ['ADMIN','TEACHER','STUDENT'] },
+  { to: '/dashboard', label: 'Επισκόπηση',  icon: '⊞', roles: ['ADMIN','TEACHER','STUDENT'] },
   { to: '/timetable', label: 'Εβδομαδιαίο', icon: '▦', roles: ['ADMIN','TEACHER'] },
   { to: '/exams',     label: 'Εξεταστική',  icon: '◫', roles: ['ADMIN','TEACHER'] },
   { to: '/courses',   label: 'Μαθήματα',    icon: '≡', roles: ['ADMIN','TEACHER','STUDENT'] },
@@ -88,7 +88,7 @@ export default function Navbar() {
 
       <nav className="ceid-nav">
         {/* Brand */}
-        <Link to="/" className="ceid-nav-brand">
+        <Link to="/dashboard" className="ceid-nav-brand">
           <div className="ceid-nav-brand-logo">ΠΠ</div>
           <div>
             <div className="ceid-nav-brand-title">Ωρολόγιο ΤΜΗΥΠ</div>

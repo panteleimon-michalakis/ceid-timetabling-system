@@ -29,7 +29,7 @@ function RoleRoute({
 }) {
   const { user, isAuthenticated } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  if (!user || !roles.includes(user.role)) return <Navigate to="/" replace />;
+  if (!user || !roles.includes(user.role)) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -40,8 +40,9 @@ function AppLayout() {
       <Navbar />
       <Routes>
         {/* Προσβάσιμο από όλους τους συνδεδεμένους */}
-        <Route path="/"        element={<Dashboard />} />
-        <Route path="/courses" element={<Courses />} />
+        <Route path="/"          element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/courses"   element={<Courses />} />
         <Route path="/view"    element={<StudentView />} />
 
         {/* Μόνο ADMIN + TEACHER */}
@@ -74,7 +75,7 @@ function AppLayout() {
         } />
 
         {/* Fallback: άγνωστο path → αρχική */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </>
   );
@@ -87,7 +88,7 @@ function AppRoutes() {
     <Routes>
       {/* Login — αν ήδη συνδεδεμένος → αρχική */}
       <Route path="/login" element={
-        isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />
+        isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />
       } />
       {/* Όλα τα άλλα → protected */}
       <Route path="/*" element={
