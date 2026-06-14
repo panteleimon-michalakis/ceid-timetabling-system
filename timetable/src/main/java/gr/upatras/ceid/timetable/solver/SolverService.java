@@ -9,7 +9,6 @@ import gr.upatras.ceid.timetable.entity.TeacherConstraint;
 import gr.upatras.ceid.timetable.entity.RoomConstraint;
 import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import gr.upatras.ceid.timetable.repository.*;
-import gr.upatras.ceid.timetable.util.GreekHolidays;
 import gr.upatras.ceid.timetable.util.ExamDateRules;
 import org.springframework.stereotype.Service;
 
@@ -175,8 +174,7 @@ public void generateExamSlotsForTimetable(Timetable timetable) {
 
     while (!currentDate.isAfter(timetable.getEndDate())) {
         if (isExamWorkingDay(currentDate)
-                && !GreekHolidays.isPublicHoliday(currentDate)
-                && !excluded.contains(currentDate)) {
+                && !ExamDateRules.isExcludedExamDate(currentDate, excluded)) {
             for (LocalTime startTime : examStartTimes) {
                 LocalDate date = currentDate;
 

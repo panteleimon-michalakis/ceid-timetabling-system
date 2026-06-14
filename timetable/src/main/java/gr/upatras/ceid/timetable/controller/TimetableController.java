@@ -5,7 +5,7 @@ import gr.upatras.ceid.timetable.repository.*;
 import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
 import gr.upatras.ceid.timetable.entity.RoomConstraint;
 import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
-import gr.upatras.ceid.timetable.util.GreekHolidays;
+import gr.upatras.ceid.timetable.util.ExamDateRules;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.transaction.annotation.Transactional;
@@ -2903,8 +2903,7 @@ public ResponseEntity<?> generateExamSlots(@RequestBody Map<String, String> body
         DayOfWeek dow = current.getDayOfWeek();
 
         if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY
-                && !GreekHolidays.isPublicHoliday(current)
-                && !excluded.contains(current)) {
+                && !ExamDateRules.isExcludedExamDate(current, excluded)) {
             for (int hour : examHours) {
                 LocalTime startTime = LocalTime.of(hour, 0);
                 LocalTime endTime = LocalTime.of(hour + 3, 0);
