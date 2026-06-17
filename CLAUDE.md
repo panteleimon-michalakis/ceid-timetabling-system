@@ -58,7 +58,9 @@ Secrets ΜΟΝΟ σε `.env` (gitignored)/env vars. ΠΟΤΕ σε tracked αρχ
 7. ΜΗΝ προσθέτεις προσωπικά δεδομένα (ονόματα/διαθεσιμότητες) σε κώδικα/tracked —
    μόνο στη βάση.
 8. Γλώσσα: απαντήσεις ελληνικά, κώδικας/identifiers αγγλικά, UI strings ελληνικά.
-9. Σε κάθε αλλαγή που αξίζει για το γραπτό: ετικέτα «📝 thesis note».
+9. Σε κάθε αλλαγή που αξίζει για το γραπτό: ετικέτα «📝 thesis note». **Routing:**
+   📝 thesis notes → προσάρτησε σε `THESIS_NOTES.md` (ΟΧΙ στο BACKLOG/inline).
+   Actionable findings (προς υλοποίηση) → BACKLOG.
 10. **Model tiers:** 🟣 Fable = solver/architecture/security · 🔵 Opus = bounded
     features/PDF/κείμενο · 🟢 Sonnet = CRUD/mechanical/polish. Ανέφερε προτεινόμενο tier.
 
