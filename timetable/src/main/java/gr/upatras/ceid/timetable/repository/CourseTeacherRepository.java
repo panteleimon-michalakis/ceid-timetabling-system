@@ -16,6 +16,16 @@ public interface CourseTeacherRepository extends JpaRepository<CourseTeacher, Lo
     // S1: «σε χρήση» καθηγητής = διδάσκει ≥1 μάθημα → deactivate αντί hard-delete.
     boolean existsByTeacherId(Long teacherId);
 
+    /*
+     * S2: authoritative πηγή teacherKeys για τον solver. Join-fetch ώστε να
+     * φορτώνονται teacher & course ΑΞΙΟΠΙΣΤΑ ΧΩΡΙΣ εξάρτηση από OSIV/transaction
+     * (το solve() δεν είναι @Transactional & open-in-view=false). Πριν το S2 το
+     * lazy access πετούσε LazyInitializationException → σιωπηλά swallowed → το
+     * M2M loop ήταν de-facto dead code.
+     */
+    @Query("select ct from CourseTeacher ct join fetch ct.teacher join fetch ct.course")
+    List<CourseTeacher> findAllWithTeacherAndCourse();
+
     boolean existsByCourseIdAndTeacherIdAndRole(
             Long courseId,
             Long teacherId,

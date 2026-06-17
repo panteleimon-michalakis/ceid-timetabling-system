@@ -366,33 +366,41 @@ private boolean isCourseRelevant(Course course, Timetable timetable) {
     return ttSem.name().equals(cSem.name());
 }
 
-private Map<Long, Set<String>> buildTeacherKeyMap() {
+/*
+ * S2: το course_teachers M2M είναι η AUTHORITATIVE πηγή teacherKeys.
+ *  - Φορτώνεται με join-fetch (αξιόπιστο χωρίς OSIV/transaction).
+ *  - Φιλτράρονται οι inactive διδάσκοντες (BL-5: soft-delete → αόρατος στον
+ *    solver, συμμετρικά με τις inactive αίθουσες του S1).
+ *  - teachers_text: DEPRECATED fallback — χρησιμοποιείται ΜΟΝΟ για μαθήματα
+ *    χωρίς καμία CourseTeacher γραμμή (να μη χαθούν conflict edges μη-wired
+ *    μαθημάτων). Η στήλη παραμένει για display· drop σε μελλοντικό migration
+ *    αφού η Φ2 wiring εξασφαλίσει πλήρη κάλυψη M2M.
+ * Package-private για στοχευμένο test (TeacherKeyMapTest, ίδιο package).
+ */
+Map<Long, Set<String>> buildTeacherKeyMap() {
     Map<Long, Set<String>> map = new HashMap<>();
+    Set<Long> coursesWithM2M = new HashSet<>();
 
-    for (CourseTeacher ct : courseTeacherRepo.findAll()) {
+    for (CourseTeacher ct : courseTeacherRepo.findAllWithTeacherAndCourse()) {
         if (ct.getCourse() == null || ct.getTeacher() == null) continue;
+        Long courseId = ct.getCourse().getId();
+        coursesWithM2M.add(courseId);  // έχει M2M row → authoritative, ΟΧΙ fallback
 
-        try {
-            String name = ct.getTeacher().getName();
+        if (!Boolean.TRUE.equals(ct.getTeacher().getActive())) continue;  // BL-5
 
-            if (name != null && !name.isBlank()) {
-                String key = teacherKey(name);
-
-                if (!key.isBlank()) {
-                    map.computeIfAbsent(ct.getCourse().getId(), k -> new HashSet<>()).add(key);
-                }
-            }
-        } catch (Exception e) {
-            // Skip lazy init failures
+        String key = teacherKey(ct.getTeacher().getName());
+        if (key != null && !key.isBlank()) {
+            map.computeIfAbsent(courseId, k -> new HashSet<>()).add(key);
         }
     }
 
+    // Fallback (deprecated): teachers_text ΜΟΝΟ για μαθήματα χωρίς M2M rows.
     for (Course course : courseRepo.findAll()) {
+        if (coursesWithM2M.contains(course.getId())) continue;
         if (course.getTeachersText() == null || course.getTeachersText().isBlank()) continue;
 
         for (String part : splitTeacherText(course.getTeachersText())) {
             String key = teacherKey(part);
-
             if (!key.isBlank()) {
                 map.computeIfAbsent(course.getId(), k -> new HashSet<>()).add(key);
             }
