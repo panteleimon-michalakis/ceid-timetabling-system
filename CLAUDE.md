@@ -6,129 +6,169 @@
 
 ## Δομή & Stack
 
-- `timetable/` — backend: Java 21, Spring Boot 3.5, JPA, Spring Security (JWT),
-  PostgreSQL 16, Timefold Solver 1.11
+- `timetable/` — backend: Java 21 (OpenJDK Temurin), Spring Boot 3.5, JPA,
+  Spring Security (JWT), PostgreSQL 16, Timefold Solver 1.11 (Community, Apache 2.0)
 - `frontend/` — React 19 + TypeScript + Vite (dark theme `#080f1a`)
 - Solver: `timetable/src/main/java/gr/upatras/ceid/timetable/solver/`
-  - `CeidConstraintProvider` (εβδομαδιαίο, 17 constraints) και
-    `ExamConstraintProvider` (εξεταστική, 14 constraints)
+  - `CeidConstraintProvider` (εβδομαδιαίο) και `ExamConstraintProvider` (εξεταστική)
   - Κάθε `Lesson` = 1 ώρα (weekly) ή 1 εξέταση σε 3ωρο slot (exam)
-- Υπάρχουν: 47 ConstraintVerifier tests, GitHub Actions CI, Docker compose,
-  backup scripts (`scripts/`), Swagger UI (`/swagger-ui.html`)
+  - **Δύο κόσμοι:** JPA entities (storage) vs solver POJOs (compute, flat snapshots)
+- Υπάρχουν: **66 tests** (ConstraintVerifier + validation + util), GitHub Actions CI,
+  Docker compose, backup scripts (`scripts/`), Swagger UI (`/swagger-ui.html`)
 - Test accounts (dev μόνο): admin/admin123, teacher/teacher123, student/student123
 
 ## Εντολές (Windows)
 
-Το backend (`mvnw.cmd`, `pom.xml`) βρίσκεται στο nested path `timetable\timetable\`
-σε σχέση με το repo root — όλες οι `mvnw.cmd` εντολές τρέχουν από εκεί.
-
-Backend (από `timetable/`):
-- Build: `mvnw.cmd clean compile` · Tests: `mvnw.cmd test` (θέλει PostgreSQL up
-  + env var `DB_PASSWORD`) · Run: `mvnw.cmd spring-boot:run` (port 8080)
+Backend (`mvnw.cmd`, `pom.xml`) στο nested path `timetable\timetable\` — όλες οι
+`mvnw.cmd` εντολές τρέχουν από εκεί.
+- Build: `mvnw.cmd clean compile` · Tests: `mvnw.cmd test` (θέλει PostgreSQL up +
+  env `DB_PASSWORD`) · Run: `mvnw.cmd spring-boot:run` (8080)
 - Μόνο solver tests: `mvnw.cmd test -Dtest=*ConstraintProviderTest`
 
 Frontend (από `frontend/`):
-- `npm install` · `npx tsc --noEmit -p tsconfig.app.json` · `npx eslint src`
-- `npm run build` · dev server: `npm run dev` (port 5173)
+- `npm install` · `npx tsc --noEmit -p tsconfig.app.json` · `npx eslint src` ·
+  `npm run build` · dev: `npm run dev` (5173)
 
 Βάση: db `ceid_timetable`, user `ceid_admin`, password από env `DB_PASSWORD`.
-Secrets: ΜΟΝΟ σε `.env` (gitignored) / env vars. ΠΟΤΕ σε tracked αρχεία.
+Secrets ΜΟΝΟ σε `.env` (gitignored)/env vars. ΠΟΤΕ σε tracked αρχεία.
 
 ## Κανόνες εργασίας (ΑΠΑΡΑΒΑΤΟΙ)
 
-1. ΕΝΑ task τη φορά. Ροή: υλοποίηση → `mvnw.cmd test` ΟΛΑ πράσινα (και τα 47
-   υπάρχοντα) → conventional commit (feat/fix/test/refactor/chore με scope) →
-   σύντομη αναφορά τι άλλαξε.
-2. Πριν από ΚΑΘΕ αλλαγή σε solver/validation: τρέξε πρώτα τα ConstraintVerifier
-   tests για baseline. Μετά την αλλαγή: ξανά. Κάθε νέο/αλλαγμένο constraint
-   συνοδεύεται από νέο test.
-3. ΜΗΝ αλλάζεις βάρη/λογική υπαρχόντων constraints χωρίς ρητή έγκριση —
-   υλοποιούν επίσημους κανόνες του τμήματος.
-4. Ιεραρχία βαρών (διατήρησέ τη): HARD: βασικά conflicts 1, required same-year 5,
-   blocked slots 10. SOFT exam: sameYearSameDay 6, directionGroupA 5,
-   A6 preferences 4, spread 3, teacher/day 2, tie-breakers 1.
-5. Σχήμα DB: `ddl-auto=update` προς το παρόν — όταν μπει Flyway, ΚΑΘΕ αλλαγή
-   σχήματος = νέο migration, ποτέ edit παλιών.
-6. SQL σε δεδομένα: transaction με ROLLBACK δυνατότητα + πρόταση backup
-   (`scripts/backup-db.ps1`) πριν.
-7. ΜΗΝ προσθέτεις προσωπικά δεδομένα (ονόματα/διαθεσιμότητες καθηγητών) σε
-   κώδικα ή tracked αρχεία — μόνο στη βάση. Εκκρεμεί μεταφορά του
-   TeacherAvailabilityRegistry στη DB + καθάρισμα git history (task #4).
+1. **Ρυθμός εργασίας ανά ρίσκο (risk-based cadence):**
+   - **HIGH-RISK** (solver, Flyway migrations, entities, snapshot/soft-delete,
+     validation/transactions, security): ΕΝΑ task τη φορά → `mvnw.cmd test` ΟΛΑ
+     πράσινα (+νέα) → conventional commit → 📝 thesis note → ΣΤΑΜΑΤΑ για ρητό «ΟΚ».
+   - **LOW-RISK** (CRUD, UI strings, σχόλια, polish, mechanical refactors):
+     checkpoint-batching — ομάδα συναφών αλλαγών → ΜΙΑ φορά verify
+     (`npm run build` + `npx tsc --noEmit` ή/και `mvnw.cmd test`) → commit(s) ανά
+     λογική μονάδα → ΣΤΑΜΑΤΑ για «ΟΚ».
+   Πάντα: manual-approve edits (ποτέ auto-accept), commits ΧΩΡΙΣ Co-Authored-By,
+   backup βάσης (`scripts/backup-db.ps1`) πριν από κάθε αλλαγή σχήματος/δεδομένων (#6).
+2. Πριν από ΚΑΘΕ αλλαγή σε solver/validation: ConstraintVerifier baseline → αλλαγή →
+   ξανά. Κάθε νέο/αλλαγμένο constraint = νέο test.
+3. ΜΗΝ αλλάζεις βάρη/λογική υπαρχόντων constraints χωρίς ρητή έγκριση.
+4. Ιεραρχία βαρών HARD: conflicts 1, required same-year 5, blocked slots 10.
+   SOFT: sameYearSameDay 6, directionGroupA 5, A6 prefs 4, spread 3, teacher/day 2,
+   tie-breakers 1. **(Νέοι κανόνες κατευθύνσεων — βλ. §Αρχιτεκτονική, ΧΡΕΙΑΖΟΝΤΑΙ
+   έγκριση βαρών.)**
+5. **Flyway ΕΝΕΡΓΟ (priority #1).** Από τη στιγμή που μπει: ΚΑΘΕ αλλαγή σχήματος =
+   νέο versioned migration (`Vx__desc.sql`), ΠΟΤΕ edit παλιών. Έρχονται πολλές
+   αλλαγές μοντέλου — γι' αυτό μπαίνει πρώτο.
+6. SQL σε δεδομένα: transaction με ROLLBACK + backup (`scripts/backup-db.ps1`) πριν.
+7. ΜΗΝ προσθέτεις προσωπικά δεδομένα (ονόματα/διαθεσιμότητες) σε κώδικα/tracked —
+   μόνο στη βάση.
 8. Γλώσσα: απαντήσεις ελληνικά, κώδικας/identifiers αγγλικά, UI strings ελληνικά.
-9. Σε κάθε αλλαγή που αξίζει για το γραπτό: ετικέτα «📝 thesis note» στο τέλος
-   της αναφοράς (design decisions, μετρικές πριν/μετά, αρχιτεκτονικά σκεπτικά).
+9. Σε κάθε αλλαγή που αξίζει για το γραπτό: ετικέτα «📝 thesis note».
+10. **Model tiers:** 🟣 Fable = solver/architecture/security · 🔵 Opus = bounded
+    features/PDF/κείμενο · 🟢 Sonnet = CRUD/mechanical/polish. Ανέφερε προτεινόμενο tier.
+
+## 🏗️ Αρχιτεκτονική-στόχος (ΕΓΚΕΚΡΙΜΕΝΕΣ αποφάσεις — invariants)
+
+Αυτά κατευθύνουν όλη τη νέα δουλειά. Μην τα παραβιάζεις χωρίς ρητή αλλαγή εδώ.
+
+1. **Snapshot-on-write + soft-delete.** Όταν δημιουργείται/τοποθετείται ανάθεση,
+   αντιγράφονται denormalized τα display πεδία (course code+name, teacher names,
+   room code, timeslot label) στη γραμμή. Τα προγράμματα render-άρονται από το
+   **snapshot** → μένουν ανέπαφα σε μετέπειτα αλλαγές/διαγραφές master δεδομένων.
+   Master entities: **soft-delete** (`active=false`), όχι hard delete αν υπάρχει
+   ιστορική αναφορά. (Ίδια αρχή με τα solver POJOs.)
+2. **`CourseOffering {course, curriculum: ΠΠΣ|ΝΠΣ, semester(nullable)}`** για multi-
+   εξάμηνο: ένα μάθημα → πολλά offerings (π.χ. 1ο στο ΠΠΣ, 2ο στο ΝΠΣ). Επιλογής:
+   `semester=null` + κατεύθυνση.
+3. **`Direction {code: Κ1.., name, color}`** + Course↔Direction **many-to-many**
+   (μάθημα σε >1 κατεύθυνση). Ο `sector` ΚΑΤΑΡΓΕΙΤΑΙ. Υποχρεωτικά: κατεύθυνση κενή/
+   κλειδωμένη. **Νέοι solver κανόνες (🟣, χρειάζονται έγκριση βαρών):**
+   `directionRequiredElectiveConflict` (μη-σύμπτωση υποχρ.-κατ'-επιλ. ίδιας
+   κατεύθυνσης — ανάλογο requiredSameYear=5) + `directionGaps` (ελαχιστοποίηση κενών
+   εντός κατεύθυνσης — ανάλογο spread=3).
+4. **Γενικευμένο `Constraint {scope: WEEKLY|EXAM, targetType: TEACHER|ROOM|COURSE|
+   GLOBAL, targetId, day, hour|range, state: PREFERRED|NEUTRAL|BLOCKED}`.** Default =
+   PREFERRED. **Νέο NEUTRAL** (πορτοκαλί/γκρι). Επεξεργασία από frontend → DB →
+   διάβασμα από solver. Αντικαθιστά/επεκτείνει TeacherConstraint/RoomConstraint με
+   `scope`+`state`. `validateAssignment` επιστρέφει **structured reason** (π.χ.
+   `TEACHER_BLOCKED`) για κόκκινο error μήνυμα στο UI.
 
 ## Πηγή αλήθειας δεδομένων
 
-`docs/official/` = επίσημα έγγραφα τμήματος (ΠΠΣ κατάλογος μαθημάτων, Κ1-Κ6
-κατευθύνσεις). Για διασταυρώσεις ονομάτων/κωδικών: αυτά υπερισχύουν του κώδικα.
-`docs/private/` (gitignored, μόνο τοπικά) = φόρμες διδασκόντων με προσωπικά
-δεδομένα. ΜΗΝ αντιγράψεις περιεχόμενό τους σε tracked αρχεία.
+`docs/official/` = επίσημα έγγραφα τμήματος (ΠΠΣ μαθήματα, Κ1-Κ6 κατευθύνσεις) —
+υπερισχύουν του κώδικα. `docs/private/` (gitignored) = φόρμες διδασκόντων με
+προσωπικά δεδομένα — ΜΗΝ τα αντιγράφεις σε tracked αρχεία.
 
 ## Baseline αναφοράς
 
 Weekly solver στο πλήρες dataset (118 μαθήματα, 14+1 αίθουσες): 266/266 lessons,
-hardScore 0, ~30s. Αν μετά από αλλαγή δεν πιάνει hardScore 0, κάτι χάλασε.
-Σημ.: ορισμένα αποθηκευμένα timetables (π.χ. NewEarino) ΔΕΝ πιάνουν hardScore 0
-λόγω δομικά μη-ικανοποιήσιμων co-taught μαθημάτων — δεν είναι regression,
-βλ. task A.
+hardScore 0, ~30s. Αν μετά από αλλαγή δεν πιάνει 0, κάτι χάλασε. (Ορισμένα co-taught
+σε αποθηκευμένα timetables δεν πιάνουν 0 λόγω λαθών δεδομένων, όχι regression — λύνεται
+στο task E.)
 
-## Ουρά tasks (με σειρά)
+## 🗺️ Roadmap (νέο, μετά τη συνάντηση) — βλ. `Plano-Frontend-Rework.md` για λεπτομέρεια
 
-A) ~~Διάγνωση «6 validation errors με 0 hard» (NewEarino)~~ — ΔΙΑΓΝΩΣΤΗΚΕ
-   (2026-06-13). Η αρχική υπόθεση (απόκλιση normalizers) ΔΕΝ ίσχυε: τα 6 errors
-   ήταν ΑΛΗΘΙΝΕΣ συγκρούσεις διδάσκοντα (μαθήματα 31/68/71 «Θεωρία Υπολογισμού /
-   Κρυπτογραφία / Ευρυζωνικές», co-taught από Κακλαμάνη+Παπαϊωάννου, ταυτόσημα
-   ονόματα + κοινό teacher.id). Η «0 hard» δεν αναπαράγεται: re-solve δίνει
-   hardScore -6 (SOLVED_WITH_HARD_CONFLICTS) — solver & validation ΣΥΜΦΩΝΟΥΝ.
-   Ρίζα: δομική υπερ-ανάθεση (≈16 co-taught ώρες που πρέπει όλες να μην
-   επικαλύπτονται) υπό τον περιορισμό διαθεσιμότητας του Κακλαμάνη (από τον
-   hardcoded TeacherAvailabilityRegistry — `teacher_constraints` κενός, βλ.
-   task #4). ΕΓΙΝΕ fix ενός δευτερεύοντος bug: το validation διπλομετρούσε
-   SAME_COURSE_SAME_SLOT και ως TEACHER_CONFLICT (commit fix(validation), νέο
-   TimetableControllerValidationTest).
-   ΑΝΑΛΥΣΗ ΕΦΙΚΤΟΤΗΤΑΣ (2026-06-14, ΑΡΧΙΚΗ — ΑΝΑΤΡΑΠΗΚΕ): είχε εκτιμηθεί ότι τα
-   co-taught είναι ΔΟΜΙΚΑ ΑΔΥΝΑΤΑ (κοινό παράθυρο μόλις ~10 slots/εβδ, 16 co-taught
-   ώρες που κληρονομούν ΚΑΙ ΟΙ ΔΥΟ τα teacher keys → pigeonhole ≥6 αναπόφευκτες
-   συγκρούσεις = το hardScore -6). Αυτό ΔΕΝ ισχύει.
-   ΑΝΑΘΕΩΡΗΣΗ (2026-06-14, μετά από διερεύνηση των φορμών διδασκόντων σε
-   docs/private): με ΣΩΣΤΑ δεδομένα τα co-taught ΔΕΝ είναι infeasible — το «10
-   slots» της αρχικής ανάλυσης βασιζόταν σε ΛΑΘΟΣ δεδομένα του hardcoded
-   TeacherAvailabilityRegistry. Ευρήματα: (1) το παράθυρο διαθεσιμότητας του ενός
-   διδάσκοντα στον registry είναι υπερβολικά περιοριστικό — οι φόρμες δείχνουν
-   διαθεσιμότητα και μετά τις 17:00 για τα co-taught, άρα το κοινό παράθυρο είναι
-   ουσιαστικά μεγαλύτερο από 10 slots· (2) τα μαθήματα 68/71 έχουν phantom
-   tut/lab ώρες στη DB που ΔΕΝ υπάρχουν στις φόρμες (πλασματικός φόρτος που
-   φουσκώνει το «16 ώρες»)· (3) πιθανό λάθος attribution διδάσκοντα στο 68.
-   ΣΥΜΠΕΡΑΣΜΑ: το hardScore -6 οφείλεται σε ΛΑΘΗ ΔΕΔΟΜΕΝΩΝ (λάθος registry, phantom
-   ώρες, λάθος attribution), ΟΧΙ σε πραγματική δομική αδυναμία. Δεν χρειάζεται
-   αλλαγή solver/constraints. Όλη η διόρθωση ανήκει στο task #4/E (διασταύρωση &
-   μεταφορά δεδομένων διαθεσιμότητας/μαθημάτων στη DB)· εκεί τα co-taught θα πρέπει
-   να γίνουν εφικτά (hardScore 0) με σωστά δεδομένα. Σημ.: τα προσωπικά δεδομένα
-   των φορμών μένουν ΜΟΝΟ τοπικά (docs/private, gitignored) — δεν αντιγράφονται εδώ.
-   ΕΚΚΡΕΜΕΙ (χωριστά): προαιρετικά η ενοποίηση normalizers σε TeacherNameUtil ως
-   καθαρό DRY refactor (ΔΕΝ είναι bug fix).
-B) ~~Tests για A6 constraints~~ — ΕΓΙΝΕ (47/47, βλ. ExamConstraintProviderTest).
-C) Refactor: TimetableController (~2900 γραμμές) → ValidationService,
-   PlacementService, ExamSlotService. Καμία αλλαγή συμπεριφοράς — τα tests κριτής.
-   Κράτα μετρικές πριν/μετά (γραμμές/κλάση) για 📝 thesis.
-D) ~~A12: εξαιρούμενες ημερομηνίες/αργίες στη δημιουργία exam slots~~ — ΕΓΙΝΕ
-   (2026-06-14). Νέο `util/GreekHolidays` (authoritative): σταθερές αργίες ως
-   MonthDay + κινητές βάσει Ορθόδοξου Πάσχα (Meeus computus + 13 ημέρες, ΟΧΙ
-   hardcoded ανά έτος) — πάντα εξαιρούνται. Custom εξαιρέσεις admin: νέο πεδίο
-   `Timetable.excludedDates` (@ElementCollection `timetable_excluded_dates`),
-   ορίζονται κατά τη δημιουργία (UI `TimetableSelector`, CSV→backend). Φίλτρο στις
-   ΔΥΟ διαδρομές παραγωγής (`SolverService.generateExamSlotsForTimetable` = η
-   πραγματική του UI, + batch `/generate-exam-slots`): `!weekend && !isPublicHoliday
-   && !excluded`. Καμία αλλαγή solver/constraint (αν δεν υπάρχει slot, δεν
-   τοποθετείται εξέταση). Tests: `GreekHolidaysTest` (7) + 3 για `parseExcludedDates`
-   → 61/61 πράσινα. Schema: ddl-auto=update τώρα· note για μελλοντικό Flyway
-   migration του `timetable_excluded_dates` (κανόνας #5). ΕΚΤΟΣ scope (follow-ups):
-   cleanup ήδη-αποθηκευμένων slots σε αργίες· ανά-αργία toggle.
-E) Διασταύρωση δεδομένων: ονόματα/κωδικοί μαθημάτων & καθηγητών του DataSeeder
-   και της DB vs `docs/official/` — ΠΡΩΤΑ αναφορά αποκλίσεων, μετά διορθώσεις
-   κατόπιν έγκρισης.
+**Τρέχουσα εστίαση: λειτουργίες δημιουργίας προγράμματος + έναρξη γραπτού.**
+Σειρά κατά εξάρτηση (κάθε φάση ξεκλειδώνει την επόμενη):
 
-Ευρύτερο πλάνο: βλ. TASKS.md (αν υπάρχει στη ρίζα) — φάσεις A (features),
-B (υποδομή — εκκρεμούν Flyway, Docker validation), C (UI polish + WCAG βλ.
-WCAG_AUDIT.md), D (γραπτό).
+- **Φ0 Guardrails:** Flyway (#1) · safe validation · backups/ROLLBACK · Γ-UI-1 rename
+  `CPSolver`→Timefold (UI strings + 3 σχόλια).
+- **Φ1 Μοντέλο (🟣):** Direction(+2 κανόνες) · CourseOffering · CourseTeacher wire ·
+  γενικευμένο Constraint(+neutral) · snapshot+soft-delete · task E (registry→DB).
+- **Φ2 CRUD frontend (🟢🔵):** course checkboxes (teacher/sem/dir) · Directions/
+  Constraints/TimeSlots pages · soft-delete UI. (Υπάρχουν ήδη Courses/Rooms/Teachers/
+  Users → επέκταση.)
+- **Φ3 Redesign προγραμμάτων (🔵):** full-width + controls κάτω · warnings table κάτω ·
+  κάρτες-κωδικοί + hover/click info · no-scroll 9-21×Δευ-Παρ · φίλτρα έτος/εξάμηνο/
+  κατεύθυνση (auto-refresh) · κάρτες εξαμήνου πάνω · suggested-pos κάτω · exam parity.
+- **Φ4 Περιορισμοί UX (🔵):** neutral · μαζική επιλογή · error μηνύματα (όλοι, 2 scopes) ·
+  (stretch) include-which-constraints.
+- **Φ5 PDF overhaul (🔵):** print dialog+checkboxes · 4 κατηγορίες σελίδων (εξάμηνο/
+  αίθουσα/καθηγητής/κατεύθυνση) · πλήρη ονόματα+χρώμα · κόκκινο Χ μπλοκαρισμένων.
+- **Φ6 Εξεταστική:** ΕΠΙ ΔΙΠΛΩΜΑΤΙ (load-all) · compressed grid.
+- **Stretch:** Φ7 public StudentView (=A8) · Φ8 αναπληρώσεις · Φ9 A7 import.
+- **Ongoing:** Δ-phase γραπτό · ConstraintVerifier νέων κανόνων · incremental C refactor
+  (TimetableController ~2998γρ → ValidationService/PlacementService/ExamSlotService).
+
+## Resolved (ιστορικό — συνοπτικά)
+
+- ✅ A: NewEarino «6 errors / 0 hard» — ΑΛΗΘΙΝΕΣ co-taught συγκρούσεις λόγω **λαθών
+  δεδομένων** (λάθος registry, phantom tut/lab ώρες, λάθος attribution), ΟΧΙ δομική
+  αδυναμία· διόρθωση ανήκει στο task E. Fixed δευτερεύον double-count bug (+test).
+- ✅ B: A6 tests. ✅ D: A12 αργίες/εξαιρέσεις (`util/GreekHolidays` + `excludedDates`).
+
+## Εργαλεία/βιβλιοθήκες (για κεφ. 2 γραπτού)
+
+Backend: Spring Boot 3.5 (Apache 2.0), Hibernate/JPA, PostgreSQL 16 + JDBC,
+**Timefold Solver 1.11 Community** (Apache 2.0, constraint streams), Lombok (MIT),
+jjwt (Apache 2.0), springdoc-openapi/Swagger (Apache 2.0), Maven, JUnit +
+ConstraintVerifier. **ΝΕΟ: Flyway** (Community, Apache 2.0).
+Frontend: React 19/TS/Vite (MIT/Apache), react-router-dom, axios (MIT), ESLint,
+native HTML5 Drag&Drop, `window.print()`+print CSS, custom iCal export.
+**PDF overhaul — ΑΠΟΦΑΣΗ ΕΚΚΡΕΜΕΙ:** print-CSS+dedicated print view (0 deps, default)
+ή pdfmake/@react-pdf/renderer (MIT) αν θέλουμε «Download .pdf» αρχείο.
+Tooling: Docker/compose, GitHub Actions, Git, Claude Code (AI pair-programmer).
+
+## 📋 BACKLOG — Παρατηρημένα προς υλοποίηση (deferred)
+
+**[BL-1] Solver persistence atomicity (B2 από Φ0/0.2) — HIGH PRIORITY**
+Σημείο: `SolverService.solve()` → `saveSolution()` (private, self-invocation).
+Πρόβλημα: `deleteAll(old)` + loop `save(new)` + `save(score)` ΔΕΝ είναι ατομικά·
+exception στο persist → παλιές αναθέσεις σβησμένες + μερικές νέες.
+Γιατί αναβλήθηκε: σκέτο `@Transactional` δεν ενεργοποιείται (private
+self-invocation)· δεν τυλίγουμε τα ~30s solve σε tx· το early SOLVING save
+θέλει χωριστό commit για το UI.
+Λύση: extract της persistence σε ξεχωριστό transactional bean/method
+(boundary ΜΟΝΟ γύρω από τα writes, ΟΧΙ γύρω από το solve).
+Tier: 🔴 Fable. Τοποθέτηση: πιθανότατα ΜΕΣΑ στη Φ1 (το snapshot-on-write
+αναδιαμορφώνει ούτως ή άλλως το solver persistence).
+
+**[BL-2] CourseController.delete error-handling**
+500 σε FK violation αντί για καθαρό 4xx (409/400). Atomicity ΟΚ (single
+write)· μόνο error-handling/UX. Tier: 🟢 Sonnet (polish).
+
+**[BL-3] Frontend ESLint cleanup**
+9× `@typescript-eslint/no-explicit-any` (ExamTimetable.tsx, Courses.tsx,
+TimetableSelector.tsx, MoveAssignmentModal.tsx) + 1×
+`react-refresh/only-export-components`. ΔΕΝ μπλοκάρουν το CI (warnings), αλλά
+σήμα ποιότητας για το γραπτό. Tier: 🟢 Sonnet. Πότε: πριν την παράδοση.
+
+**[BL-4] CI actions → Node 24**
+`actions/checkout@v4` + `setup-node@v4` + `setup-java@v4` σε deprecated Node 20·
+ο runner ήδη σπρώχνει Node 24. Λύση: bump σε `@v5`.
+Tier: 🟢 Sonnet/manual. Commit: `ci: bump actions to Node 24`.
