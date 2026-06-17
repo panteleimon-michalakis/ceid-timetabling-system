@@ -116,10 +116,11 @@ class TransactionalRollbackTest {
     }
 
     // ====================================================================
-    // B1a: DELETE room σε χρήση -> 409, ΤΙΠΟΤΑ δεν σβήνεται
+    // B1a (S1): DELETE room σε χρήση -> soft-delete (deactivate), ΤΙΠΟΤΑ δεν
+    // σβήνεται. Νέα σημασιολογία soft-delete αντί του παλιού 409 hard-delete.
     // ====================================================================
     @Test
-    void roomDelete_whenInUse_returns409_andDeletesNothing() {
+    void roomDelete_whenInUse_deactivates_keepsData() {
         Room room = createRoom("TEST_RB_ROOM_A");
         createConstraint(room);
         Timetable t = createTimetable();
@@ -127,8 +128,9 @@ class TransactionalRollbackTest {
 
         ResponseEntity<?> resp = roomController.delete(room.getId());
 
-        assertEquals(409, resp.getStatusCode().value());
-        assertTrue(roomRepo.existsById(room.getId()), "η αίθουσα δεν πρέπει να διαγράφηκε");
+        assertEquals(200, resp.getStatusCode().value(), "deactivate -> 200, όχι 409/204");
+        Room reloaded = roomRepo.findById(room.getId()).orElseThrow();
+        assertEquals(Boolean.FALSE, reloaded.getActive(), "η αίθουσα απενεργοποιήθηκε");
         assertEquals(1, constraintRepo.findByRoomId(room.getId()).size(),
                 "τα constraints ΔΕΝ πρέπει να σβήστηκαν");
         assertTrue(assignmentRepo.existsByRoomId(room.getId()), "η ανάθεση παραμένει");

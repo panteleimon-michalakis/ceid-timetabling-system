@@ -13,6 +13,9 @@ public interface CourseTeacherRepository extends JpaRepository<CourseTeacher, Lo
 
     List<CourseTeacher> findByTeacherId(Long teacherId);
 
+    // S1: «σε χρήση» καθηγητής = διδάσκει ≥1 μάθημα → deactivate αντί hard-delete.
+    boolean existsByTeacherId(Long teacherId);
+
     boolean existsByCourseIdAndTeacherIdAndRole(
             Long courseId,
             Long teacherId,

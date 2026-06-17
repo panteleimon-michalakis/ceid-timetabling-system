@@ -88,6 +88,9 @@ public class SecurityConfig {
                 // ── Καθηγητές ─────────────────────────────────────────────
                 .requestMatchers(HttpMethod.POST,   "/api/teachers/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/teachers/**").hasRole("ADMIN")
+                // Soft-delete toggle: ADMIN-only (ΠΡΙΝ τον γενικό PUT κανόνα, ώστε
+                // να μην το φτάνει TEACHER μέσω ownership-check του controller).
+                .requestMatchers(HttpMethod.PUT,    "/api/teachers/*/active").hasRole("ADMIN")
                 // TEACHER επιτρέπεται PUT, αλλά ο controller ελέγχει ownership
                 // (μπορεί να επεξεργαστεί ΜΟΝΟ τον δικό του φάκελο/διαθεσιμότητα).
                 .requestMatchers(HttpMethod.PUT,    "/api/teachers/**").hasAnyRole("ADMIN", "TEACHER")

@@ -5,7 +5,6 @@ import gr.upatras.ceid.timetable.entity.RoomConstraint;
 import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import gr.upatras.ceid.timetable.repository.RoomRepository;
 import gr.upatras.ceid.timetable.repository.TimetableAssignmentRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -105,7 +104,27 @@ public class RoomController {
 
     @PostMapping
     public Room create(@RequestBody Room room) {
+        // Jackson (no-args + setters): αν το JSON δεν φέρει active, default true.
+        if (room.getActive() == null) room.setActive(true);
         return roomRepo.save(room);
+    }
+
+    /**
+     * Ενεργοποίηση/απενεργοποίηση αίθουσας (soft-delete toggle) — ADMIN-only
+     * (PUT /api/rooms/** στο SecurityConfig). Body: { "active": true|false }.
+     */
+    @PutMapping("/{id}/active")
+    @Transactional
+    public ResponseEntity<?> setActive(@PathVariable Long id,
+                                       @RequestBody Map<String, Object> body) {
+        Room room = roomRepo.findById(id).orElse(null);
+        if (room == null) return ResponseEntity.notFound().build();
+        if (!(body.get("active") instanceof Boolean active)) {
+            return ResponseEntity.badRequest().body(Map.of("error",
+                "Απαιτείται boolean πεδίο 'active'."));
+        }
+        room.setActive(active);
+        return ResponseEntity.ok(roomRepo.save(room));
     }
 
     @PutMapping("/{id}")
@@ -127,20 +146,22 @@ public class RoomController {
     @DeleteMapping("/{id}")
     @Transactional
     public ResponseEntity<?> delete(@PathVariable Long id) {
-        if (!roomRepo.existsById(id)) {
+        Room room = roomRepo.findById(id).orElse(null);
+        if (room == null) {
             return ResponseEntity.notFound().build();
         }
-        // Pre-check ΧΩΡΙΣ καμία εγγραφή: αν η αίθουσα χρησιμοποιείται σε αναθέσεις,
-        // επιστρέφουμε 409 Conflict και ΔΕΝ σβήνουμε τίποτα (ούτε τα constraints).
+        // Soft-delete (S1): αν η αίθουσα χρησιμοποιείται σε αναθέσεις, ΔΕΝ
+        // σβήνεται (θα έσπαγε FK παλιών προγραμμάτων) — απενεργοποιείται. Η
+        // γραμμή & τα constraints μένουν, ο solver/προτεινόμενες θέσεις την
+        // παραλείπουν (active-aware reads).
         if (assignmentRepo.existsByRoomId(id)) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error",
-                "Η αίθουσα χρησιμοποιείται σε αναθέσεις προγραμμάτων και δεν μπορεί "
-                + "να διαγραφεί. Αφαίρεσε πρώτα τις αναθέσεις (ή τα παλιά προγράμματα) "
-                + "ή απενεργοποίησέ τη για εξεταστική/εξαμηνιαίο."));
+            room.setActive(false);
+            roomRepo.save(room);
+            return ResponseEntity.ok(Map.of("deactivated", true, "id", id));
         }
-        // Ελεύθερη αίθουσα: constraints + room σβήνονται ατομικά μέσα στο ίδιο
-        // transaction. Τυχόν exception ΔΕΝ καταπνίγεται -> καθαρό rollback
-        // (καμία μερική εγγραφή, κανένα UnexpectedRollbackException).
+        // Ποτέ δεν χρησιμοποιήθηκε: hard-delete. constraints + room σβήνονται
+        // ατομικά μέσα στο ίδιο transaction. Τυχόν exception ΔΕΝ καταπνίγεται ->
+        // καθαρό rollback (καμία μερική εγγραφή, κανένα UnexpectedRollbackException).
         constraintRepo.deleteByRoomId(id);
         roomRepo.deleteById(id);
         return ResponseEntity.noContent().build();

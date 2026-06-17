@@ -51,6 +51,12 @@ public class Room {
     @Column(columnDefinition = "TEXT")
     private String notes;
 
+    // Soft-delete (S1): false = απενεργοποιημένη — δεν προσφέρεται στον solver
+    // ούτε σε νέες αναθέσεις, αλλά η γραμμή & τα FK παλιών προγραμμάτων μένουν.
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean active = true;
+
     public enum RoomType {
         AMPHITHEATER,   // Αμφιθέατρο (Γ, Β)
         CLASSROOM,      // Αίθουσα (Δ1, Δ2, Ε1, Ε2)

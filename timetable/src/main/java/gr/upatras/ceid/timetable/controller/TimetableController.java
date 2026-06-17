@@ -366,8 +366,8 @@ public ResponseEntity<?> getPlacementOptions(
 
     List<Room> rooms = (isExamTimetable(timetable)
             || parsedAssignmentType == TimetableAssignment.AssignmentType.EXAM)
-            ? roomRepo.findByAvailableForExamsTrue()
-            : roomRepo.findAll();
+            ? roomRepo.findByAvailableForExamsTrueAndActiveTrue()
+            : roomRepo.findByActiveTrue();
 
     TimeSlot.SlotType desiredSlotType = (isExamTimetable(timetable)
             || parsedAssignmentType == TimetableAssignment.AssignmentType.EXAM)

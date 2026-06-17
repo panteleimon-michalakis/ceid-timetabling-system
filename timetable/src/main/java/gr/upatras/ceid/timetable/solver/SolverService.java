@@ -219,9 +219,9 @@ private List<SolverRoom> buildSolverRooms(Timetable timetable) {
     List<Room> sourceRooms;
 
     if (timetable.getTimetableType() == Timetable.TimetableType.EXAM) {
-        sourceRooms = roomRepo.findByAvailableForExamsTrue();
+        sourceRooms = roomRepo.findByAvailableForExamsTrueAndActiveTrue();
     } else {
-        sourceRooms = roomRepo.findByAvailableForSemesterTrue();
+        sourceRooms = roomRepo.findByAvailableForSemesterTrueAndActiveTrue();
     }
 
     List<SolverRoom> result = new ArrayList<>();

@@ -87,7 +87,28 @@ public class TeacherController {
 
     @PostMapping
     public Teacher create(@RequestBody Teacher teacher) {
+        // Jackson (no-args + setters): αν το JSON δεν φέρει active, default true.
+        if (teacher.getActive() == null) teacher.setActive(true);
         return teacherRepo.save(teacher);
+    }
+
+    /**
+     * Ενεργοποίηση/απενεργοποίηση καθηγητή (soft-delete toggle) — ADMIN-only
+     * (ειδικός matcher PUT /api/teachers/{id}/active στο SecurityConfig, ΠΡΙΝ
+     * τον γενικό κανόνα που επιτρέπει PUT σε TEACHER). Body: { "active": bool }.
+     */
+    @PutMapping("/{id}/active")
+    @Transactional
+    public ResponseEntity<?> setActive(@PathVariable Long id,
+                                       @RequestBody Map<String, Object> body) {
+        Teacher teacher = teacherRepo.findById(id).orElse(null);
+        if (teacher == null) return ResponseEntity.notFound().build();
+        if (!(body.get("active") instanceof Boolean active)) {
+            return ResponseEntity.badRequest().body(Map.of("error",
+                "Απαιτείται boolean πεδίο 'active'."));
+        }
+        teacher.setActive(active);
+        return ResponseEntity.ok(teacherRepo.save(teacher));
     }
 
     @PutMapping("/{id}")
@@ -109,10 +130,18 @@ public class TeacherController {
 
     @DeleteMapping("/{id}")
     @Transactional
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        if (!teacherRepo.existsById(id)) return ResponseEntity.notFound().build();
+    public ResponseEntity<?> delete(@PathVariable Long id) {
+        Teacher teacher = teacherRepo.findById(id).orElse(null);
+        if (teacher == null) return ResponseEntity.notFound().build();
+        // Soft-delete (S1): αν ο καθηγητής διδάσκει ≥1 μάθημα (CourseTeacher
+        // αναφορά), ΔΕΝ σβήνεται — απενεργοποιείται, κρατώντας links/ιστορικό.
+        if (courseTeacherRepo.existsByTeacherId(id)) {
+            teacher.setActive(false);
+            teacherRepo.save(teacher);
+            return ResponseEntity.ok(Map.of("deactivated", true, "id", id));
+        }
+        // Ποτέ δεν χρησιμοποιήθηκε: hard-delete (constraints + teacher, ατομικά).
         constraintRepo.deleteByTeacherId(id);
-        courseTeacherRepo.deleteAll(courseTeacherRepo.findByTeacherId(id));
         teacherRepo.deleteById(id);
         return ResponseEntity.noContent().build();
     }

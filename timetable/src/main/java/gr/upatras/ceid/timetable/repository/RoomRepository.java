@@ -8,7 +8,10 @@ import java.util.List;
 public interface RoomRepository extends JpaRepository<Room, Long> {
     Optional<Room> findByCode(String code);
     List<Room> findByRoomType(Room.RoomType roomType);
-    List<Room> findByAvailableForSemesterTrue();
-    List<Room> findByAvailableForExamsTrue();
+    // S1: active-aware reads — απενεργοποιημένες αίθουσες δεν προσφέρονται
+    // στον solver ούτε στις προτεινόμενες θέσεις.
+    List<Room> findByActiveTrue();
+    List<Room> findByAvailableForSemesterTrueAndActiveTrue();
+    List<Room> findByAvailableForExamsTrueAndActiveTrue();
     List<Room> findByCapacityGreaterThanEqual(Integer capacity);
 }

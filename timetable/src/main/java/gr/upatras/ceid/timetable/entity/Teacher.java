@@ -46,6 +46,12 @@ public class Teacher {
 
     private String notes;
 
+    // Soft-delete (S1): false = απενεργοποιημένος. Hard-delete μόνο αν δεν
+    // διδάσκει κανένα μάθημα (καμία CourseTeacher αναφορά)· αλλιώς deactivate.
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean active = true;
+
     public enum TeacherType {
         PROFESSOR,
         ASSOCIATE_PROFESSOR,
