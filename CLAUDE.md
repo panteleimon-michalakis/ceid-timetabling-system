@@ -172,3 +172,12 @@ TimetableSelector.tsx, MoveAssignmentModal.tsx) + 1×
 `actions/checkout@v4` + `setup-node@v4` + `setup-java@v4` σε deprecated Node 20·
 ο runner ήδη σπρώχνει Node 24. Λύση: bump σε `@v5`.
 Tier: 🟢 Sonnet/manual. Commit: `ci: bump actions to Node 24`.
+
+**[BL-5] Inactive teacher που ακόμα διδάσκει (από S1)**
+Το soft-delete (S1) απενεργοποιεί καθηγητή που ΕΧΕΙ CourseTeacher links (η
+κανονική περίπτωση deactivate), αλλά ο solver εξακολουθεί να αντλεί `teacherKeys`
+από αυτά τα links → ένας inactive teacher συνεχίζει να επιβάλλει teacher-conflict/
+availability constraints. Σκόπιμα εκτός scope S1. Λύση: είτε φιλτράρισμα inactive
+στο `buildTeacherKeyMap`/availability reads, είτε «reassign-before-deactivate» UX
+(ο admin ανακατανέμει τα μαθήματα πριν απενεργοποιήσει). Τοποθέτηση: S4 (γενικευμένο
+Constraint) ή νωρίτερα αν χρειαστεί. Tier: 🟣/🔵.
