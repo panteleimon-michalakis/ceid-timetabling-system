@@ -1824,7 +1824,7 @@ if (examTimetable
 }
 
     // =========================================================
-    // SOLVER (Timefold CPSolver)
+    // SOLVER (Timefold)
     // =========================================================
 
     @PostMapping("/{id}/solve")

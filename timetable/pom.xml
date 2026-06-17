@@ -79,7 +79,7 @@
 			<artifactId>spring-security-test</artifactId>
 			<scope>test</scope>
 		</dependency>
-<!-- Timefold Solver (CPSolver) -->
+<!-- Timefold Solver -->
         <dependency>
             <groupId>ai.timefold.solver</groupId>
             <artifactId>timefold-solver-spring-boot-starter</artifactId>

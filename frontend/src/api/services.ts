@@ -53,7 +53,7 @@ export const timeSlotService = {
 
 /**
  * Απάντηση του greedy auto-scheduler.
- * Έχει διαφορετικό σχήμα από το SolverResult του CPSolver.
+ * Έχει διαφορετικό σχήμα από το SolverResult του Timefold.
  */
 export interface AutoScheduleSummary {
   timetableId: number;

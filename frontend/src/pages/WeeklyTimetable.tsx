@@ -824,7 +824,7 @@ async function runAutoSchedule() {
 
 async function runSolver() {
     if (!selectedTimetableId) return;
-    if (!confirm('Εκτέλεση CPSolver;\n\nΘα αντικαταστήσει τις αυτόματα τοποθετημένες ώρες.\nΟι χειροκίνητες τοποθετήσεις θα παραμείνουν.\nΔιάρκεια: ~30 δευτερόλεπτα.')) return;
+    if (!confirm('Εκτέλεση Timefold;\n\nΘα αντικαταστήσει τις αυτόματα τοποθετημένες ώρες.\nΟι χειροκίνητες τοποθετήσεις θα παραμείνουν.\nΔιάρκεια: ~30 δευτερόλεπτα.')) return;
 
     setScheduling(true);
     setError(null);
@@ -834,7 +834,7 @@ async function runSolver() {
       const res = await timetableService.solve(selectedTimetableId, 30);
       const data = res.data as any;
       setMessage(
-        `CPSolver: ${data.totalPlaced} ώρες τοποθετήθηκαν | Hard: ${data.hardScore} | Soft: ${data.softScore} | ${(data.solveTimeMs / 1000).toFixed(1)}s`
+        `Timefold: ${data.totalPlaced} ώρες τοποθετήθηκαν | Hard: ${data.hardScore} | Soft: ${data.softScore} | ${(data.solveTimeMs / 1000).toFixed(1)}s`
       );
       setPlacementOptions(null);
       await loadTimetableData(selectedTimetableId);
@@ -1022,7 +1022,7 @@ async function runSolver() {
                 cursor: scheduling ? 'wait' : 'pointer',
               }}
             >
-              {scheduling ? 'Solver...' : 'CPSolver'}
+              {scheduling ? 'Solver...' : 'Timefold'}
             </button>
           )}
 

@@ -666,7 +666,7 @@ export default function ExamTimetable() {
               📅 Δημιουργία Slots
             </button>
             <button onClick={handleSolve} disabled={solving || saving} style={solverBtn}>
-              {solving ? 'Εκτελείται...' : '⚡ CPSolver'}
+              {solving ? 'Εκτελείται...' : '⚡ Timefold'}
             </button>
             <button
               onClick={async () => {
