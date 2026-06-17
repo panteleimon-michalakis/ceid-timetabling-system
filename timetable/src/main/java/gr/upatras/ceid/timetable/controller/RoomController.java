@@ -4,6 +4,8 @@ import gr.upatras.ceid.timetable.entity.Room;
 import gr.upatras.ceid.timetable.entity.RoomConstraint;
 import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import gr.upatras.ceid.timetable.repository.RoomRepository;
+import gr.upatras.ceid.timetable.repository.TimetableAssignmentRepository;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -18,10 +20,13 @@ public class RoomController {
 
     private final RoomRepository roomRepo;
     private final RoomConstraintRepository constraintRepo;
+    private final TimetableAssignmentRepository assignmentRepo;
 
-    public RoomController(RoomRepository roomRepo, RoomConstraintRepository constraintRepo) {
+    public RoomController(RoomRepository roomRepo, RoomConstraintRepository constraintRepo,
+                          TimetableAssignmentRepository assignmentRepo) {
         this.roomRepo = roomRepo;
         this.constraintRepo = constraintRepo;
+        this.assignmentRepo = assignmentRepo;
     }
 
     /** Δεσμευμένες ώρες αίθουσας. */
@@ -120,20 +125,24 @@ public class RoomController {
     }
 
     @DeleteMapping("/{id}")
+    @Transactional
     public ResponseEntity<?> delete(@PathVariable Long id) {
         if (!roomRepo.existsById(id)) {
             return ResponseEntity.notFound().build();
         }
-        try {
-            constraintRepo.deleteByRoomId(id);
-            roomRepo.deleteById(id);
-            roomRepo.flush();
-            return ResponseEntity.noContent().build();
-        } catch (Exception ex) {
-            return ResponseEntity.badRequest().body(Map.of("error",
+        // Pre-check ΧΩΡΙΣ καμία εγγραφή: αν η αίθουσα χρησιμοποιείται σε αναθέσεις,
+        // επιστρέφουμε 409 Conflict και ΔΕΝ σβήνουμε τίποτα (ούτε τα constraints).
+        if (assignmentRepo.existsByRoomId(id)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error",
                 "Η αίθουσα χρησιμοποιείται σε αναθέσεις προγραμμάτων και δεν μπορεί "
                 + "να διαγραφεί. Αφαίρεσε πρώτα τις αναθέσεις (ή τα παλιά προγράμματα) "
                 + "ή απενεργοποίησέ τη για εξεταστική/εξαμηνιαίο."));
         }
+        // Ελεύθερη αίθουσα: constraints + room σβήνονται ατομικά μέσα στο ίδιο
+        // transaction. Τυχόν exception ΔΕΝ καταπνίγεται -> καθαρό rollback
+        // (καμία μερική εγγραφή, κανένα UnexpectedRollbackException).
+        constraintRepo.deleteByRoomId(id);
+        roomRepo.deleteById(id);
+        return ResponseEntity.noContent().build();
     }
 }

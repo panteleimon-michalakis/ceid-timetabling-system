@@ -15,6 +15,7 @@ public interface TimetableAssignmentRepository extends JpaRepository<TimetableAs
     List<TimetableAssignment> findByTimetableId(@Param("timetableId") Long timetableId);
     List<TimetableAssignment> findByCourseId(Long courseId);
     List<TimetableAssignment> findByRoomId(Long roomId);
+    boolean existsByRoomId(Long roomId);
     List<TimetableAssignment> findByTimeSlotId(Long timeSlotId);
     List<TimetableAssignment> findByTimetableIdAndAssignmentType(Long timetableId, TimetableAssignment.AssignmentType type);
     List<TimetableAssignment> findByIsLockedTrue();

@@ -11,6 +11,7 @@ import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import gr.upatras.ceid.timetable.repository.*;
 import gr.upatras.ceid.timetable.util.ExamDateRules;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -149,6 +150,7 @@ private List<SolverTimeSlot> buildSolverTimeSlots(Timetable timetable) {
     return result;
 }
 
+@Transactional
 public void generateExamSlotsForTimetable(Timetable timetable) {
     if (timetable.getStartDate() == null || timetable.getEndDate() == null) {
         throw new IllegalArgumentException("Για πρόγραμμα εξεταστικής απαιτούνται startDate και endDate.");

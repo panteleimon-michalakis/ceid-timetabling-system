@@ -195,8 +195,10 @@ public ResponseEntity<?> create(@RequestBody Map<String, String> body) {
     }
 
     @DeleteMapping("/{id}")
+    @Transactional
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         if (timetableRepo.existsById(id)) {
+            // Atomic: αν αποτύχει το delete του timetable, οι αναθέσεις δεν χάνονται.
             assignmentRepo.deleteAll(assignmentRepo.findByTimetableId(id));
             timetableRepo.deleteById(id);
             return ResponseEntity.noContent().build();
