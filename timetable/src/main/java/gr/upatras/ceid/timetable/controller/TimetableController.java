@@ -31,6 +31,7 @@ private final RoomRepository roomRepo;
 private final TimeSlotRepository timeSlotRepo;
 private final CourseTeacherRepository courseTeacherRepo;
 private final gr.upatras.ceid.timetable.solver.SolverService solverService;
+private final gr.upatras.ceid.timetable.service.AssignmentSnapshotStamper snapshotStamper;
 public TimetableController(TimetableRepository timetableRepo,
                            TimetableAssignmentRepository assignmentRepo,
                            CourseRepository courseRepo,
@@ -38,7 +39,9 @@ public TimetableController(TimetableRepository timetableRepo,
                            TimeSlotRepository timeSlotRepo,
                            CourseTeacherRepository courseTeacherRepo,
                            RoomConstraintRepository roomConstraintRepo,
-                           gr.upatras.ceid.timetable.solver.SolverService solverService) {
+                           gr.upatras.ceid.timetable.solver.SolverService solverService,
+                           gr.upatras.ceid.timetable.service.AssignmentSnapshotStamper snapshotStamper) {
+    this.snapshotStamper = snapshotStamper;
     this.roomConstraintRepo = roomConstraintRepo;
     this.timetableRepo = timetableRepo;
     this.assignmentRepo = assignmentRepo;
@@ -295,6 +298,7 @@ boolean locked = Boolean.TRUE.equals(lockedValue)
                 .createdAt(LocalDateTime.now())
                 .build();
 
+        snapshotStamper.stamp(assignment);
         TimetableAssignment saved = assignmentRepo.save(assignment);
         return ResponseEntity.ok(assignmentToDto(saved));
     }
@@ -1519,6 +1523,7 @@ private boolean isExamTimetable(Timetable timetable) {
         assignment.setTimeSlot(targetTimeSlot);
         assignment.setManuallyAssigned(true);
 
+        snapshotStamper.stamp(assignment);
         assignmentRepo.save(assignment);
 
         var refreshed = assignmentRepo.findById(assignment.getId());
@@ -1961,6 +1966,7 @@ if (examTimetable
                                 .createdAt(LocalDateTime.now())
                                 .build();
 
+                        snapshotStamper.stamp(assignment);
                         TimetableAssignment saved = assignmentRepo.save(assignment);
                         currentAssignments.add(saved);
                         totalPlaced++;
