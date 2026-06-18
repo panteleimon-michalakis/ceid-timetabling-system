@@ -65,3 +65,25 @@ co-taught ordering, role-attach, empty/null, ελληνικά με τόνους)
 replaces × διπλό πέρασμα cleanTeacherDisplayName) — κλειδώθηκε ως-έχει, διόρθωση
 ξεχωριστά. Δείχνει τη χρησιμότητα του characterization testing σε behavior-preserving
 extract.
+
+### [842151a] S3b-2 — snapshot stamping (AssignmentSnapshotStamper)
+Νέο `@Component AssignmentSnapshotStamper.stamp(a)`: γράφει ΚΑΙ τα 16 denormalized
+πεδία (Course 6 / Room 4 / Time 6) από τα ΤΡΕΧΟΝΤΑ live entities, καλούμενο ακριβώς
+πριν από κάθε save στα 3 controller write-paths — manual placement (298), move (1522,
+με re-stamp room/slot στη νέα θέση), auto-schedule (1964). Pure in-memory (μηδέν DB
+πρόσβαση)· enum πεδία ως `.name()` String· null entity → αφήνει την ομάδα ως έχει.
+Το `teachers_text` περνά μέσω `TeacherDisplayText.normalizeTeachersTextForDto` (single
+source με το assignmentToDto — βλ. S3b-1).
+
+ΑΠΟΦΑΣΗ — πηγή teacher names = **Option 1** (normalized `course.teachers_text`), ΟΧΙ
+το active M2M που πρότεινε αρχικά το `S3_PROMPT.md`. Συνειδητή, εγκεκριμένη απόκλιση
+από το spec: (1) **display fidelity** — το snapshot == ό,τι έδειχνε το UI κατά την
+τοποθέτηση· (2) **μηδέν join-per-stamp** μέσα στο ~266-assignment solve loop (το stamp
+μπαίνει στο atomic tx του BL-1/S3c)· (3) **καμία cross-screen ordering inconsistency**
+(το M2M role-order διέφερε από το αλφαβητικό normalize του UI). Καταγράφεται για καθαρό
+spec↔implementation trail.
+
+Tests: unit (16 πεδία + exam date/period + move re-stamp + null-safety) + wiring
+`@SpringBootTest` ανά path (place/move/auto-schedule). Το auto-schedule path
+απομονώθηκε με pre-fill (γέμισμα ωρών των real courses → ο greedy τα προσπερνά,
+τοποθετεί μόνο το test course) → ~3s αντί full-dataset build (663s). 92/92 πράσινα.
