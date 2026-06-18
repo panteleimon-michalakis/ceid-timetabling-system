@@ -87,3 +87,39 @@ Tests: unit (16 πεδία + exam date/period + move re-stamp + null-safety) + w
 `@SpringBootTest` ανά path (place/move/auto-schedule). Το auto-schedule path
 απομονώθηκε με pre-fill (γέμισμα ωρών των real courses → ο greedy τα προσπερνά,
 τοποθετεί μόνο το test course) → ~3s αντί full-dataset build (663s). 92/92 πράσινα.
+
+### [7e585a7] S3c — ατομική solver persistence (SolutionPersistenceService, BL-1)
+Το BL-1 (Φ0/0.2): η εγγραφή της λύσης (`deleteAll` παλιών auto-αναθέσεων + loop
+`save` νέων + `setStatus(SOLVED)`) έτρεχε σε **auto-commit** (non-transactional
+solve, OSIV=false) → exception στη μέση = παλιές αναθέσεις σβησμένες + μερικές νέες
+(μερική, μη-αναιρέσιμη εγγραφή). Σκέτη προσθήκη `@Transactional` στο παλιό
+`saveSolution` ΔΕΝ έλυνε το πρόβλημα: ήταν **private + self-invoked** από το
+`solve()` (ίδιο bean) → το Spring proxy παρακάμπτεται **σιωπηλά**, καμία tx.
+
+Λύση (move-only): εξαγωγή της persistence αυτούσιας σε **ξεχωριστό injected
+`@Transactional SolutionPersistenceService.persist`**. Ως entry-point σε άλλο bean
+το proxy είναι ενεργό → όλα τα writes σε **ΕΝΑ** transaction (all-or-nothing,
+default rollback σε RuntimeException). Το ~30s `solver.solve(...)` μένει στον
+`SolverService`, **ΕΚΤΟΣ** tx (δεν κρατά DB connection όσο τρέχει)· το early
+`SOLVING` status save παραμένει ξεχωριστό πριν το solve (το UI το θέλει committed
+για την κατάσταση «ΕΠΕΞΕΡΓΑΣΙΑ»).
+
+Διευκρίνιση «save score» (διατύπωση BL-1): το πεδίο `Timetable.solverScore` είναι
+**dormant** (δεν γράφεται πουθενά)· το μόνο timetable write είναι το
+`setStatus(SOLVED)`. Move-only ⇒ **καμία** προσθήκη `setSolverScore`.
+
+Snapshot-on-write: ο stamper μπήκε ΚΑΙ στον 4ο (solver) write-path, ακριβώς πριν
+το `save`, συμμετρικά με place/move/auto-schedule (S3b-2). Τρέχει μέσα στο atomic
+tx με `findById`-φορτωμένα entities (scalar reads, χωρίς lazy join).
+
+Verification: νέο `TransactionalRollbackTest` ×2 — (α) σκάσιμο στο 2ο `save` →
+πλήρες rollback (η προϋπάρχουσα ανάθεση επανέρχεται, 0 μερικές νέες, status ≠
+SOLVED· το ΑΚΡΙΒΕΣ σενάριο BL-1)· (β) επιτυχές persist → snapshot stamped. Καλούν
+απευθείας το `persist` με χειρο-φτιαγμένη `CeidTimetable` (όχι ακριβό 30s solve),
+όπως το A2 καλεί το `generateExamSlotsForTimetable`. Throwaway full-solve (πλήρες
+FALL dataset, μετά διαγραφή) → 266/266 @ hard 0 (baseline αμετάβλητο). Full suite
+94/94, χωρίς circular dependency στο boot.
+
+Dead code που έμεινε σκόπιμα (εκτός scope, move-only): το ιδιωτικό `hardScoreName`
+και το αχρησιμοποίητο local `hardViolations` — ποτέ δεν καλούνται/διαβάζονται·
+καθαρισμός ξεχωριστά.

@@ -148,17 +148,15 @@ Tooling: Docker/compose, GitHub Actions, Git, Claude Code (AI pair-programmer).
 
 ## 📋 BACKLOG — Παρατηρημένα προς υλοποίηση (deferred)
 
-**[BL-1] Solver persistence atomicity (B2 από Φ0/0.2) — HIGH PRIORITY**
-Σημείο: `SolverService.solve()` → `saveSolution()` (private, self-invocation).
-Πρόβλημα: `deleteAll(old)` + loop `save(new)` + `save(score)` ΔΕΝ είναι ατομικά·
-exception στο persist → παλιές αναθέσεις σβησμένες + μερικές νέες.
-Γιατί αναβλήθηκε: σκέτο `@Transactional` δεν ενεργοποιείται (private
-self-invocation)· δεν τυλίγουμε τα ~30s solve σε tx· το early SOLVING save
-θέλει χωριστό commit για το UI.
-Λύση: extract της persistence σε ξεχωριστό transactional bean/method
-(boundary ΜΟΝΟ γύρω από τα writes, ΟΧΙ γύρω από το solve).
-Tier: 🔴 Fable. Τοποθέτηση: πιθανότατα ΜΕΣΑ στη Φ1 (το snapshot-on-write
-αναδιαμορφώνει ούτως ή άλλως το solver persistence).
+**[BL-1] Solver persistence atomicity — ✅ RESOLVED (S3c, 7e585a7)**
+Η persistence εξήχθη (move-only) από το private self-invoked `saveSolution` σε
+ξεχωριστό injected `@Transactional SolutionPersistenceService.persist` → proxy
+ενεργό, όλα τα writes (`deleteAll` + per-lesson `save` + `setStatus(SOLVED)`) σε
+ΕΝΑ tx (all-or-nothing). Το `solve()` μένει ΕΚΤΟΣ tx· το early SOLVING save
+ξεχωριστό. Snapshot stamped και στον 4ο (solver) write-path. Διευκρ.: το
+`solverScore` ήταν dormant (καμία προσθήκη `setSolverScore`). Tests:
+`TransactionalRollbackTest` ×2 (mid-save rollback + success stamp) + throwaway
+full-solve 266/266 @ hard 0· full suite 94/94. Βλ. THESIS_NOTES [7e585a7].
 
 **[BL-2] CourseController.delete error-handling**
 500 σε FK violation αντί για καθαρό 4xx (409/400). Atomicity ΟΚ (single
