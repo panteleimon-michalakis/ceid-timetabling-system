@@ -190,3 +190,12 @@ Constraint) ή νωρίτερα αν χρειαστεί. Tier: 🟣/🔵.
 double-booking ανώνυμου διδάσκοντα. Λύση: wire πραγματικούς διδάσκοντες στο
 course_teachers M2M στη Φ2. Μαθήματα: CEID_23Y209, CEID_NE4648, CEID_NE4847,
 CEID_NE9DE, CEID_NE5668, CEID_GP68, CEID_DE2. Tier: 🔵 data/Φ2.
+
+**[BL-7] CourseController teacher-normalize duplicate (από S3b-1)**
+Στο S3b-1 η αλυσίδα ~15 μεθόδων normalize διδασκόντων εξήχθη από τον TimetableController
+σε `util/TeacherDisplayText` (single source για το snapshot/timetable path). Ο
+CourseController διατηρεί ΑΚΟΜΑ δικό του αντίγραφο της ίδιας αλυσίδας (course-list DTO)
+— σκόπιμα εκτός scope S3b-1 (το snapshot contract δεν το χρειάζεται). Λύση: repoint των
+call-sites του CourseController στο `TeacherDisplayText` + αφαίρεση αντιγράφου. **ΠΡΙΝ:
+diff τα δύο αντίγραφα** (μπορεί να έχουν αποκλίνει) ώστε να μη χαθεί διαφορά συμπεριφοράς·
+αν διαφέρουν, char-test πρώτα. Tier: 🟢 Sonnet. Commit: `refactor(...)` + docs.
