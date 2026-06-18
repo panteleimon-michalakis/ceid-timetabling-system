@@ -30,13 +30,15 @@ public class SolverService {
     private final CourseTeacherRepository courseTeacherRepo;
     private final TeacherConstraintRepository constraintRepo;
     private final RoomConstraintRepository roomConstraintRepo;
+    private final SolutionPersistenceService solutionPersistence;
 
     public SolverService(CourseRepository courseRepo, RoomRepository roomRepo,
                          TimeSlotRepository timeSlotRepo, TimetableRepository timetableRepo,
                          TimetableAssignmentRepository assignmentRepo,
                          CourseTeacherRepository courseTeacherRepo,
                          TeacherConstraintRepository constraintRepo,
-                         RoomConstraintRepository roomConstraintRepo) {
+                         RoomConstraintRepository roomConstraintRepo,
+                         SolutionPersistenceService solutionPersistence) {
         this.courseRepo = courseRepo;
         this.roomRepo = roomRepo;
         this.timeSlotRepo = timeSlotRepo;
@@ -45,6 +47,7 @@ public class SolverService {
         this.courseTeacherRepo = courseTeacherRepo;
         this.constraintRepo = constraintRepo;
         this.roomConstraintRepo = roomConstraintRepo;
+        this.solutionPersistence = solutionPersistence;
     }
 
     public Map<String, Object> solve(Long timetableId, int timeLimitSeconds) {
@@ -89,8 +92,9 @@ public class SolverService {
 
         long elapsed = System.currentTimeMillis() - startTime;
 
-        // Save results
-        return saveSolution(timetable, solution, elapsed);
+        // Save results — ΑΤΟΜΙΚΑ σε ξεχωριστό @Transactional bean (S3c/BL-1).
+        // Το solve() (πάνω) μένει ΕΚΤΟΣ tx· το early SOLVING save (πάνω) είναι ήδη ξεχωριστό.
+        return solutionPersistence.persist(timetable, solution, elapsed);
     }
 
 private List<SolverTimeSlot> buildSolverTimeSlots(Timetable timetable) {
@@ -522,66 +526,6 @@ private boolean isGenericTeacherPlaceholder(String normalizedName) {
     return value.contains("ΔΙΔΑΣΚΩΝ")
             && (value.contains("ΕΝΤΕΤΑΛΜΕΝΟΣ") || value.contains("ΕΝΤΕΤ") || value.contains("ΑΑΔΕ"));
 }
-
-    private Map<String, Object> saveSolution(Timetable timetable, CeidTimetable solution, long elapsedMs) {
-        // Delete existing auto-placed assignments
-        List<TimetableAssignment> existing = assignmentRepo.findByTimetableId(timetable.getId());
-        List<TimetableAssignment> toDelete = existing.stream()
-        .filter(a -> !Boolean.TRUE.equals(a.getManuallyAssigned()))
-        .filter(a -> !Boolean.TRUE.equals(a.getIsLocked()))
-        .toList();
-        assignmentRepo.deleteAll(toDelete);
-
-        int placed = 0;
-        int hardViolations = 0;
-        List<String> log = new ArrayList<>();
-
-        HardSoftScore score = solution.getScore();
-
-        for (Lesson lesson : solution.getLessons()) {
-            if (lesson.getTimeSlot() == null || lesson.getRoom() == null) {
-                log.add("SKIP: " + lesson.getCourseCode() + " " + lesson.getAssignmentType() + " - no slot/room");
-                continue;
-            }
-
-            TimetableAssignment assignment = TimetableAssignment.builder()
-                    .timetable(timetable)
-                    .course(courseRepo.findById(lesson.getCourseId()).orElse(null))
-                    .room(roomRepo.findById(lesson.getRoom().getId()).orElse(null))
-                    .timeSlot(timeSlotRepo.findById(lesson.getTimeSlot().getId()).orElse(null))
-                    .assignmentType(TimetableAssignment.AssignmentType.valueOf(lesson.getAssignmentType()))
-                    .isLocked(false)
-                    .manuallyAssigned(false)
-                    .createdAt(java.time.LocalDateTime.now())
-                    .build();
-
-            assignmentRepo.save(assignment);
-            placed++;
-            log.add(lesson.getCourseCode() + " " + lesson.getAssignmentType()
-                    + " -> " + lesson.getTimeSlot() + " " + lesson.getRoom().getCode());
-        }
-
-// Μετά την επίλυση το πρόγραμμα είναι SOLVED. Δεν αλλάζει σε PUBLISHED
-// εδώ — αυτό γίνεται ρητά από τον ADMIN μέσω του publish workflow.
-timetable.setStatus(Timetable.Status.SOLVED);
-timetableRepo.save(timetable);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        int hardScore = score != null ? score.hardScore() : 0;
-
-	result.put("status", hardScore < 0 ? "SOLVED_WITH_HARD_CONFLICTS" : "SOLVED");
-        result.put("totalLessons", solution.getLessons().size());
-        result.put("totalPlaced", placed);
-        result.put("hardScore", hardScore);
-        result.put("softScore", score != null ? score.softScore() : 0);
-        result.put("solveTimeMs", elapsedMs);
-        result.put("deletedPrevious", toDelete.size());
-	result.put("timetableUpdated", true);
-	result.put("timetableStatus", timetable.getStatus() != null ? timetable.getStatus().name() : null);
-        result.put("log", log);
-
-        return result;
-    }
 
 private String hardScoreName(HardSoftScore score) {
     if (score == null) {

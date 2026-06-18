@@ -4,7 +4,7 @@ import gr.upatras.ceid.timetable.controller.RoomController;
 import gr.upatras.ceid.timetable.controller.TimetableController;
 import gr.upatras.ceid.timetable.entity.*;
 import gr.upatras.ceid.timetable.repository.*;
-import gr.upatras.ceid.timetable.solver.SolverService;
+import gr.upatras.ceid.timetable.solver.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +16,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -41,8 +42,8 @@ class TransactionalRollbackTest {
     @Autowired TimetableController timetableController;
     @Autowired RoomController roomController;
     @Autowired SolverService solverService;
+    @Autowired SolutionPersistenceService solutionPersistence;
 
-    @Autowired TimetableAssignmentRepository assignmentRepo;
     @Autowired RoomConstraintRepository constraintRepo;
     @Autowired CourseRepository courseRepo;
 
@@ -50,6 +51,7 @@ class TransactionalRollbackTest {
     @MockitoSpyBean TimetableRepository timetableRepo;
     @MockitoSpyBean RoomRepository roomRepo;
     @MockitoSpyBean TimeSlotRepository timeSlotRepo;
+    @MockitoSpyBean TimetableAssignmentRepository assignmentRepo;
 
     @BeforeEach
     void clean() { cleanupTestData(); }
@@ -113,6 +115,85 @@ class TransactionalRollbackTest {
 
         assertEquals(before, countTestExamSlots(),
                 "κανένα exam slot δεν πρέπει να παρέμεινε μετά το rollback");
+    }
+
+    // ====================================================================
+    // A3 (S3c/BL-1): SolutionPersistenceService.persist — deleteAll(old) +
+    // loop save(new). Exception στη μέση -> πλήρες rollback: ΟΥΤΕ οι παλιές
+    // αναθέσεις χάνονται ΟΥΤΕ μένουν μερικές νέες (το core του BL-1: το παλιό
+    // private saveSolution έτρεχε σε auto-commit -> μη ατομικό).
+    // ====================================================================
+    @Test
+    void solverPersistence_rollsBack_onMidSaveFailure_noPartialWrite() {
+        Timetable t = createTimetable();
+        Room room = roomRepo.findAll().get(0);
+
+        // Προϋπάρχουσα AUTO ανάθεση: ο στόχος του deleteAll μέσα στο persist.
+        TimetableAssignment preExisting = createAutoAssignment(t, room);
+        Long preExistingId = preExisting.getId();
+        assertEquals(1, assignmentRepo.findByTimetableId(t.getId()).size(),
+                "precondition: 1 auto ανάθεση committed");
+
+        // Λύση με 2 placed lessons -> 2 saves μέσα στο persist.
+        CeidTimetable solution = solutionWithTwoPlacedLessons(room);
+
+        // Σκάσιμο (unchecked) στο 2ο save: το deleteAll(old) + το 1ο save(new) έχουν
+        // ήδη εκτελεστεί στο ΙΔΙΟ tx -> πρέπει ΟΛΑ να αναιρεθούν (default rollback
+        // του @Transactional σε RuntimeException).
+        AtomicInteger saves = new AtomicInteger(0);
+        doAnswer(inv -> {
+            if (saves.incrementAndGet() == 2) {
+                throw new RuntimeException("boom-mid-persist-save-2");
+            }
+            return inv.callRealMethod();
+        }).when(assignmentRepo).save(any());
+
+        assertThrows(RuntimeException.class,
+                () -> solutionPersistence.persist(t, solution, 0L));
+
+        // ΑΤΟΜΙΚΟΤΗΤΑ: η παλιά ανάθεση επανήλθε (deleteAll αναιρέθηκε), καμία μερική
+        // νέα δεν έμεινε (διαφορετικά το count θα ήταν 2 — το ακριβές BL-1 bug).
+        List<TimetableAssignment> after = assignmentRepo.findByTimetableId(t.getId());
+        assertEquals(1, after.size(),
+                "rollback: ακριβώς η προϋπάρχουσα ανάθεση, καμία μερική νέα εγγραφή");
+        assertEquals(preExistingId, after.get(0).getId(),
+                "ίδιο row — το deleteAll αναιρέθηκε, δεν είναι νέα ανάθεση");
+
+        // Το status save (τέλος του persist) αναιρέθηκε/δεν εκτελέστηκε.
+        Timetable reloaded = timetableRepo.findById(t.getId()).orElseThrow();
+        assertNotEquals(Timetable.Status.SOLVED, reloaded.getStatus(),
+                "το timetable δεν πρέπει να έμεινε SOLVED μετά το rollback");
+    }
+
+    // ====================================================================
+    // A4 (S3c): επιτυχές persist -> ο 4ος (solver) write-path γράφει snapshot,
+    // συμμετρικά με place/move/auto-schedule (AssignmentSnapshotWiringTest).
+    // ====================================================================
+    @Test
+    void solverPersistence_stampsSnapshot_onSuccessfulPersist() {
+        Timetable t = createTimetable();
+        Room room = roomRepo.findAll().get(0);
+        Course course = courseRepo.findAll().get(0);
+        TimeSlot slot = timeSlotRepo.findAll().get(0);
+
+        SolverRoom sRoom = new SolverRoom(room.getId(), room.getCode(), room.getCapacity(),
+                room.getRoomType() != null ? room.getRoomType().name() : "CLASSROOM");
+        SolverTimeSlot sSlot = new SolverTimeSlot(slot.getId(), "MONDAY", 9);
+        Lesson l = new Lesson(1L, course.getId(), course.getCode(), course.getName(),
+                1, "REQUIRED", "LECTURE", 50, "FALL", 1);
+        l.setRoom(sRoom);
+        l.setTimeSlot(sSlot);
+        CeidTimetable solution = new CeidTimetable(List.of(sSlot), List.of(sRoom), List.of(l));
+
+        solutionPersistence.persist(t, solution, 0L);
+
+        List<TimetableAssignment> saved = assignmentRepo.findByTimetableId(t.getId());
+        assertEquals(1, saved.size(), "1 ανάθεση αποθηκεύτηκε");
+        TimetableAssignment a = saved.get(0);
+        assertEquals(course.getCode(), a.getSnapshotCourseCode(),
+                "ο solver path πρέπει να γράφει snapshot course code (όπως place/move/auto)");
+        assertEquals(course.getName(), a.getSnapshotCourseName(), "snapshot course name");
+        assertEquals(room.getCode(), a.getSnapshotRoomCode(), "snapshot room code");
     }
 
     // ====================================================================
@@ -196,6 +277,42 @@ class TransactionalRollbackTest {
                 .build());
     }
 
+    /** AUTO ανάθεση (manuallyAssigned=false, isLocked=false) — στόχος του solver deleteAll. */
+    private TimetableAssignment createAutoAssignment(Timetable t, Room room) {
+        Course course = courseRepo.findAll().get(0);
+        TimeSlot slot = timeSlotRepo.findAll().get(0);
+        return assignmentRepo.save(TimetableAssignment.builder()
+                .timetable(t).course(course).room(room).timeSlot(slot)
+                .assignmentType(TimetableAssignment.AssignmentType.LECTURE)
+                .isLocked(false).manuallyAssigned(false)
+                .createdAt(LocalDateTime.now())
+                .build());
+    }
+
+    /** Ελάχιστη solver λύση με 2 placed lessons (πραγματικά course/room/slot ids). */
+    private CeidTimetable solutionWithTwoPlacedLessons(Room room) {
+        Course course = courseRepo.findAll().get(0);
+        List<TimeSlot> slots = timeSlotRepo.findAll();
+        TimeSlot s1 = slots.get(0);
+        TimeSlot s2 = slots.size() > 1 ? slots.get(1) : slots.get(0);
+
+        SolverRoom sRoom = new SolverRoom(room.getId(), room.getCode(), room.getCapacity(),
+                room.getRoomType() != null ? room.getRoomType().name() : "CLASSROOM");
+        SolverTimeSlot sSlot1 = new SolverTimeSlot(s1.getId(), "MONDAY", 9);
+        SolverTimeSlot sSlot2 = new SolverTimeSlot(s2.getId(), "MONDAY", 10);
+
+        Lesson l1 = new Lesson(1L, course.getId(), course.getCode(), course.getName(),
+                1, "REQUIRED", "LECTURE", 50, "FALL", 1);
+        l1.setRoom(sRoom);
+        l1.setTimeSlot(sSlot1);
+        Lesson l2 = new Lesson(2L, course.getId(), course.getCode(), course.getName(),
+                1, "REQUIRED", "LECTURE", 50, "FALL", 1);
+        l2.setRoom(sRoom);
+        l2.setTimeSlot(sSlot2);
+
+        return new CeidTimetable(List.of(sSlot1, sSlot2), List.of(sRoom), List.of(l1, l2));
+    }
+
     private Room createRoom(String code) {
         return roomRepo.save(Room.builder()
                 .name("Test Rollback " + code).code(code).capacity(10)
@@ -221,7 +338,7 @@ class TransactionalRollbackTest {
 
     /** Marker-based καθαρισμός — ασφαλής να τρέξει πριν & μετά κάθε test. */
     private void cleanupTestData() {
-        reset(timetableRepo, roomRepo, timeSlotRepo); // καθάρισε stubs πριν τα writes
+        reset(timetableRepo, roomRepo, timeSlotRepo, assignmentRepo); // καθάρισε stubs πριν τα writes
 
         for (String code : TEST_ROOM_CODES) {
             roomRepo.findByCode(code).ifPresent(r -> {
