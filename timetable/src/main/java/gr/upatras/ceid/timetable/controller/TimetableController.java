@@ -2411,19 +2411,109 @@ private Map<Long, Set<String>> buildCourseTeacherKeyMap(List<Course> courses) {
         return null;
     }
 
-    private Map<String, Object> assignmentToDto(TimetableAssignment assignment) {
+    // Package-private για στοχευμένο S3d render test (snapshot-first overlay,
+    // incl. null-live branch που το nullable=false FK δεν επιτρέπει να persist-αριστεί).
+    Map<String, Object> assignmentToDto(TimetableAssignment assignment) {
     Map<String, Object> dto = new LinkedHashMap<>();
 
     dto.put("id", assignment.getId());
     dto.put("assignmentType", assignment.getAssignmentType() != null ? assignment.getAssignmentType().name() : null);
     dto.put("manuallyAssigned", assignment.getManuallyAssigned());
     dto.put("isLocked", assignment.getIsLocked());
-    dto.put("course", courseToDto(assignment.getCourse()));
-    dto.put("room", roomToDto(assignment.getRoom()));
-    dto.put("timeSlot", timeSlotToDto(assignment.getTimeSlot()));
+    // S3d: render-from-snapshot. Χτίζουμε τα live sub-DTOs (κοινά με το
+    // placement-options) και ΜΕΤΑ επικαλύπτουμε snapshot-first τα 16 display
+    // πεδία: όταν υπάρχει snapshot (το master άλλαξε ή διαγράφηκε) δείχνουμε το
+    // frozen snapshot, αλλιώς live. Τα ids/FKs ΜΕΝΟΥΝ live (null αν χάθηκε το master).
+    dto.put("course", snapshotFirstCourse(assignment));
+    dto.put("room", snapshotFirstRoom(assignment));
+    dto.put("timeSlot", snapshotFirstTimeSlot(assignment));
 
     return dto;
 }
+
+    /** S3d: live course DTO με snapshot-first overlay στα 6 display πεδία. */
+    private Map<String, Object> snapshotFirstCourse(TimetableAssignment a) {
+        Map<String, Object> dto = courseToDto(a.getCourse());   // live (ή null αν διαγράφηκε)
+
+        boolean hasSnapshot = a.getSnapshotCourseCode() != null || a.getSnapshotCourseName() != null
+                || a.getSnapshotSemester() != null || a.getSnapshotStudyYear() != null
+                || a.getSnapshotCourseType() != null || a.getSnapshotTeachersText() != null;
+
+        if (dto == null) {
+            if (!hasSnapshot) return null;          // διαγραμμένο master + κανένα snapshot
+            dto = new LinkedHashMap<>();
+            dto.put("id", null);                    // το live FK χάθηκε
+        }
+
+        putSnapshotFirst(dto, "code", a.getSnapshotCourseCode());
+        putSnapshotFirst(dto, "name", a.getSnapshotCourseName());
+        putSnapshotFirst(dto, "semester", a.getSnapshotSemester());
+        putSnapshotFirst(dto, "studyYear", a.getSnapshotStudyYear());
+        putSnapshotFirst(dto, "courseType", a.getSnapshotCourseType());
+        // snapshotTeachersText είναι ήδη normalized κατά το stamp (single source S3b-1) — όχι re-normalize.
+        putSnapshotFirst(dto, "teachersText", a.getSnapshotTeachersText());
+
+        return dto;
+    }
+
+    /** S3d: live room DTO με snapshot-first overlay στα 4 display πεδία. */
+    private Map<String, Object> snapshotFirstRoom(TimetableAssignment a) {
+        Map<String, Object> dto = roomToDto(a.getRoom());
+
+        boolean hasSnapshot = a.getSnapshotRoomCode() != null || a.getSnapshotRoomName() != null
+                || a.getSnapshotRoomCapacity() != null || a.getSnapshotRoomType() != null;
+
+        if (dto == null) {
+            if (!hasSnapshot) return null;
+            dto = new LinkedHashMap<>();
+            dto.put("id", null);
+        }
+
+        putSnapshotFirst(dto, "code", a.getSnapshotRoomCode());
+        putSnapshotFirst(dto, "name", a.getSnapshotRoomName());
+        putSnapshotFirst(dto, "capacity", a.getSnapshotRoomCapacity());
+        putSnapshotFirst(dto, "roomType", a.getSnapshotRoomType());
+
+        return dto;
+    }
+
+    /**
+     * S3d: live timeSlot DTO με snapshot-first overlay στα 6 display πεδία.
+     * Τα temporal snapshot πεδία (start/end/specificDate) γίνονται toString() ώστε να
+     * ταιριάζουν με το String format του live timeSlotToDto.
+     */
+    private Map<String, Object> snapshotFirstTimeSlot(TimetableAssignment a) {
+        Map<String, Object> dto = timeSlotToDto(a.getTimeSlot());
+
+        boolean hasSnapshot = a.getSnapshotDayOfWeek() != null || a.getSnapshotStartTime() != null
+                || a.getSnapshotEndTime() != null || a.getSnapshotSlotType() != null
+                || a.getSnapshotSpecificDate() != null || a.getSnapshotExamPeriodLabel() != null;
+
+        if (dto == null) {
+            if (!hasSnapshot) return null;
+            dto = new LinkedHashMap<>();
+            dto.put("id", null);
+        }
+
+        putSnapshotFirst(dto, "dayOfWeek", a.getSnapshotDayOfWeek());
+        putSnapshotFirst(dto, "startTime",
+                a.getSnapshotStartTime() != null ? a.getSnapshotStartTime().toString() : null);
+        putSnapshotFirst(dto, "endTime",
+                a.getSnapshotEndTime() != null ? a.getSnapshotEndTime().toString() : null);
+        putSnapshotFirst(dto, "slotType", a.getSnapshotSlotType());
+        putSnapshotFirst(dto, "specificDate",
+                a.getSnapshotSpecificDate() != null ? a.getSnapshotSpecificDate().toString() : null);
+        putSnapshotFirst(dto, "examPeriodLabel", a.getSnapshotExamPeriodLabel());
+
+        return dto;
+    }
+
+    /** Snapshot-first: γράφει το snapshot value μόνο αν != null (αλλιώς μένει το live). */
+    private static void putSnapshotFirst(Map<String, Object> dto, String key, Object snapshotValue) {
+        if (snapshotValue != null) {
+            dto.put(key, snapshotValue);
+        }
+    }
 
     private Map<String, Object> courseToDto(Course course) {
         if (course == null) return null;
