@@ -133,6 +133,13 @@ hardScore 0, ~30s. Αν μετά από αλλαγή δεν πιάνει 0, κά
   δεδομένων** (λάθος registry, phantom tut/lab ώρες, λάθος attribution), ΟΧΙ δομική
   αδυναμία· διόρθωση ανήκει στο task E. Fixed δευτερεύον double-count bug (+test).
 - ✅ B: A6 tests. ✅ D: A12 αργίες/εξαιρέσεις (`util/GreekHolidays` + `excludedDates`).
+- ✅ **S1** soft-delete (master active flag) · ✅ **S2** CourseTeacher M2M authoritative ·
+  ✅ **S3 snapshot-on-write ΟΛΟΚΛΗΡΩΜΕΝΟ**: V3 schema+entity (S3a) · `TeacherDisplayText`
+  single source (S3b-1) · `AssignmentSnapshotStamper` στα **4** write-paths
+  (place/move/auto + atomic solver persistence — S3b-2/**S3c=BL-1 resolved**) · render
+  **snapshot-first** στο `assignmentToDto` (S3d) · `SnapshotBackfillRunner` (S3e, backfilled
+  3086 dev rows, idempotent). **Invariant #1 (render-from-snapshot) ΕΝΕΡΓΟ.** Υπόλοιπα Φ1:
+  Direction(+2 κανόνες) · CourseOffering · γενικευμένο Constraint(+neutral) · task E.
 
 ## Εργαλεία/βιβλιοθήκες (για κεφ. 2 γραπτού)
 

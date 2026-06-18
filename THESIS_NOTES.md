@@ -158,3 +158,39 @@ Tests (`SnapshotRenderTest`, μέσω `getAssignments`): (1) live course renamed
 `id=null`, χωρίς NPE· (4) χωρίς αλλαγή → snapshot==live (μη-regression). Κανένα
 υπάρχον test δεν κάνει assert το DTO output (νέα data: snapshot==live). Full suite
 98/98.
+
+### [5b7945e] S3e — SnapshotBackfillRunner (backfill υπαρχόντων) — S3 ΟΛΟΚΛΗΡΩΜΕΝΟ
+Ο `SnapshotBackfillRunner` (`ApplicationRunner`, `@Order(100)` μετά τους seeders)
+στο startup γεμίζει το snapshot σε αναθέσεις γραμμένες ΠΡΙΝ το snapshot-on-write,
+μέσω του **ΙΔΙΟΥ** `AssignmentSnapshotStamper` — υλοποιεί την απόφαση του S3a
+(«backfill σε Java, όχι στο DDL migration»): single source ⇒ backfilled ==
+newly-stamped == render, χωρίς η SQL να αναπαράγει το `normalizeTeachersTextForDto`.
+
+Σχεδιαστικές επιλογές: (α) **null-guard στο query**, όχι `findAll`+filter:
+`findBySnapshotCourseCodeIsNull` (το `snapshot_course_code` είναι το sentinel —
+null ⇔ η course-ομάδα ποτέ stamped). **ΚΡΙΣΙΜΟ:** rows με υπάρχον snapshot ΔΕΝ
+επιλέγονται → δεν ξανα-stamp-άρονται· διαφορετικά το frozen snapshot θα γινόταν
+refresh στις ΤΡΕΧΟΥΣΕΣ live τιμές, σπάζοντας το freeze (invariant #1). (β)
+**Idempotent / re-runnable**: 2η εκτέλεση βρίσκει 0 null → no-op. Σε καθαρή/CI βάση
+(καμία ανάθεση) = no-op ⇒ καμία εγγραφή, καμία επίδραση στο V1→V2→V3 Flyway/
+ddl-validate του startup. (γ) Non-transactional `run()`: το EAGER course/room/timeSlot
+φορτώνεται με το query (detached αλλά populated), ο stamper διαβάζει scalars χωρίς
+LazyInit, `saveAll` κάνει merge — μία batch-tx μέσω της transactionality του repository.
+(δ) `@Order(100)`: μετά τους seeders (ο `DataSeeder` δεν φτιάχνει αναθέσεις, οπότε
+δεν υπάρχει σειριακή εξάρτηση).
+
+Interference (το ρίσκο του ApplicationRunner): ο runner τρέχει σε ΚΑΘΕ context-load.
+Αλλά πυροδοτείται στο **load** — πριν τα `@BeforeEach`/test bodies φτιάξουν τα δικά
+τους (committed) null-snapshot rows· δεν ξανα-τρέχει per-test (context caching). Άρα
+δεν αγγίζει rows που τα tests κρατούν σκόπιμα null (TransactionalRollbackτest auto-
+assignments, WiringTest prefill). Επιβεβαιωμένο: full suite **99/99**, με ΜΟΝΟ μία
+`backfilled 1` γραμμή (το direct `run()` του test) — τα υπόλοιπα startup loads no-op
+αφού το dev DB είχε ήδη γεμίσει.
+
+Πραγματικό backfill: το πρώτο context-load γέμισε **3086** αναθέσεις του dev DB
+(backup `pre-S3e` πριν, κανόνας #6). Tests: null→backfilled από live· υπάρχον
+(αποκλίνον) snapshot→**frozen** (όχι re-stamp)· 2η run→no-op.
+
+**S3 (snapshot-on-write) ΟΛΟΚΛΗΡΩΜΕΝΟ** (S3a→S3e): schema/entity → single source →
+4 write-paths (incl. atomic solver persistence/BL-1) → render snapshot-first →
+backfill. Invariant #1 (render-from-snapshot) ενεργό end-to-end.
