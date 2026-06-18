@@ -123,3 +123,38 @@ FALL dataset, μετά διαγραφή) → 266/266 @ hard 0 (baseline αμετ
 Dead code που έμεινε σκόπιμα (εκτός scope, move-only): το ιδιωτικό `hardScoreName`
 και το αχρησιμοποίητο local `hardViolations` — ποτέ δεν καλούνται/διαβάζονται·
 καθαρισμός ξεχωριστά.
+
+### [3d9a5c7] S3d — render-from-snapshot (assignmentToDto snapshot-first overlay)
+Πρώτο **ΟΡΑΤΟ** αποτέλεσμα του invariant #1: τα προγράμματα render-άρονται από το
+snapshot, ώστε να δείχνουν ό,τι αποτυπώθηκε κατά την τοποθέτηση — ανέπαφα σε
+μετέπειτα αλλαγή/soft-delete των master. Το `assignmentToDto` χτίζει πρώτα τα live
+sub-DTOs και ΜΕΤΑ επικαλύπτει snapshot-first τα 16 display πεδία.
+
+Σχεδιαστικές επιλογές: (α) **overlay, όχι αντικατάσταση** — τα κοινά
+`courseToDto/roomToDto/timeSlotToDto` μένουν live-only (τα χρησιμοποιεί και το
+placement-options, που ΘΕΛΕΙ τρέχουσες τιμές)· η snapshot λογική μπαίνει σε 3
+wrapper helpers ΜΟΝΟ στο assignment-render path. (β) Κανόνας ανά πεδίο: **snapshot
+αν != null, αλλιώς live, αλλιώς null** — SNAPSHOT-first (όχι live-first): όταν
+υπάρχει frozen τιμή ΚΑΙ το live άλλαξε, κερδίζει το snapshot. (γ) **ids/FKs μένουν
+live** (assignment + course/room/timeSlot id)· μόνο τα 16 display πεδία περνούν
+snapshot-first — αν χάθηκε το master FK, το id μπορεί να είναι null (αναμενόμενο).
+(δ) **Null-safe:** αν το live entity είναι null (διαγραμμένο master), χτίζεται map
+από το snapshot με `id=null` χωρίς NPE· επειδή τα FK είναι `nullable=false` +
+soft-delete (η γραμμή μένει), στην πράξη το live ΣΠΑΝΙΑ είναι null — το branch είναι
+αμυντικό, το ρεαλιστικό «deleted» = soft-delete (active=false, snapshot-first ισχύει
+έτσι κι αλλιώς). (ε) Τα temporal snapshot πεδία (start/end/specificDate, αποθηκευμένα
+ως `LocalTime`/`LocalDate`) γίνονται `toString()` ώστε να ταιριάζουν με το String
+format του live `timeSlotToDto` (αλλιώς το ίδιο πεδίο θα εμφανιζόταν με δύο μορφές).
+(στ) Το `snapshotTeachersText` περνά ΑΥΤΟΥΣΙΟ (ήδη normalized κατά το stamp, S3b-1) —
+όχι re-normalize.
+
+Το `assignmentToDto` έγινε **package-private** για στοχευμένο test (ίδιο pattern με
+το `buildTeacherKeyMap` του S2), ώστε να ελέγχεται απευθείας το null-live branch που
+το `nullable=false` FK δεν επιτρέπει να persist-αριστεί.
+
+Tests (`SnapshotRenderTest`, μέσω `getAssignments`): (1) live course renamed →
+δείχνεται το snapshot name (όχι το live)· (2) live room soft-deleted (active=false)
++ renamed → snapshot· (3) null live masters (direct call) → display από snapshot,
+`id=null`, χωρίς NPE· (4) χωρίς αλλαγή → snapshot==live (μη-regression). Κανένα
+υπάρχον test δεν κάνει assert το DTO output (νέα data: snapshot==live). Full suite
+98/98.
