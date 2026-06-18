@@ -48,3 +48,20 @@ stampSnapshot (single source — η SQL δεν αναπαράγει το Java no
 Java-derived. (γ) enum-name πεδία ως String, ώστε το snapshot να μένει ανεξάρτητο
 από μελλοντικές αλλαγές enums. Επαλήθευση: ddl-auto=validate → ο Hibernate ελέγχει
 entity↔σχήμα στο boot (αναντιστοιχία = ρητή αποτυχία)· 77/77 πράσινα, Flyway v3 καθαρό.
+
+### [65acc5d] S3b-1 — extract TeacherDisplayText (προετοιμασία single source)
+Η αλυσίδα ~15 private μεθόδων normalize διδασκόντων (ελεύθερο teachers_text →
+καθαρισμός / dedup-ανά-key / ταξινόμηση accent-insensitive / role-attachment) εξήχθη
+αυτούσια από τον TimetableController σε static `util/TeacherDisplayText`, ώστε το
+stamp (S3b-2) και το assignmentToDto να μοιράζονται ΕΝΑ implementation — αλλιώς
+stamped snapshot vs live render αποκλίνουν (drift). Gate πριν την εξαγωγή: κάθε
+μετακινούμενη μέθοδος stateless· οι 2 stateful (buildCourseTeacherKeyMap,
+findCommonTeacherNamesSmart) έμειναν στον controller και καλούν το util (static
+import). Εμβέλεια single-source = ΜΟΝΟ το snapshot/timetable path· ο CourseController
+κρατά προσωρινά δικό του αντίγραφο της ίδιας αλυσίδας μέχρι το BL-7. Behavior-preserving:
+77/77 υπάρχοντα πράσινα + characterization test (8 edge cases: ΕΔΙΠ/ΑΑΔΕ placeholders,
+co-taught ordering, role-attach, empty/null, ελληνικά με τόνους). Το test εξέθεσε
+ΠΡΟΫΠΑΡΧΟΝ quirk: «Α. Ηλία (ΕΔΙΠ)» → «Α. Ηλίαςςς (ΕΔΙΠ)» (overlapping data-fix
+replaces × διπλό πέρασμα cleanTeacherDisplayName) — κλειδώθηκε ως-έχει, διόρθωση
+ξεχωριστά. Δείχνει τη χρησιμότητα του characterization testing σε behavior-preserving
+extract.
