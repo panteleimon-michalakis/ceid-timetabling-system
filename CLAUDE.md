@@ -199,3 +199,11 @@ CourseController διατηρεί ΑΚΟΜΑ δικό του αντίγραφο 
 call-sites του CourseController στο `TeacherDisplayText` + αφαίρεση αντιγράφου. **ΠΡΙΝ:
 diff τα δύο αντίγραφα** (μπορεί να έχουν αποκλίνει) ώστε να μη χαθεί διαφορά συμπεριφοράς·
 αν διαφέρουν, char-test πρώτα. Tier: 🟢 Sonnet. Commit: `refactor(...)` + docs.
+
+**[BL-8] cleanTeacherDisplayName overlapping replaces → πλεοναστικά «ς» (από S3b-1)**
+Το ζεύγος `.replace("Α. Ηλία (ΕΔΙΠ)"→"…ς (ΕΔΙΠ)")` + `.replace("Α. Ηλία"→"…ς")`: το 2ο
+ταιριάζει το "Α. Ηλία" ΜΕΣΑ στο ήδη-διορθωμένο "Α. Ηλίας", και επειδή το
+`cleanTeacherDisplayName` τρέχει 2× (split + sort) → «Α. Ηλίαςςς (ΕΔΙΠ)». Κλειδωμένο
+από το characterization test (`TeacherDisplayTextTest` case #9). Λύση: idempotent
+replace (word-boundary/regex ή guard «αν ήδη …ς»). Impact: 1 όνομα, καθαρά εμφανισιακό
+(όχι solver/data). Tier: 🟢 Sonnet.
