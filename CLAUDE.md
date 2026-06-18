@@ -183,3 +183,10 @@ availability constraints. Σκόπιμα εκτός scope S1. Λύση: είτε
 στο `buildTeacherKeyMap`/availability reads, είτε «reassign-before-deactivate» UX
 (ο admin ανακατανέμει τα μαθήματα πριν απενεργοποιήσει). Τοποθέτηση: S4 (γενικευμένο
 Constraint) ή νωρίτερα αν χρειαστεί. Tier: 🟣/🔵.
+
+**[BL-6] Placeholder-teacher courses (data-gap, από S2)**
+7 μαθήματα διδάσκονται μόνο από generic placeholder (Ε.ΔΙ.Π. κ.λπ.) → 0 teacher keys
+→ ΧΩΡΙΣ teacher-conflict constraint (ήταν 0 και πριν — όχι regression). Πιθανό
+double-booking ανώνυμου διδάσκοντα. Λύση: wire πραγματικούς διδάσκοντες στο
+course_teachers M2M στη Φ2. Μαθήματα: CEID_23Y209, CEID_NE4648, CEID_NE4847,
+CEID_NE9DE, CEID_NE5668, CEID_GP68, CEID_DE2. Tier: 🔵 data/Φ2.
