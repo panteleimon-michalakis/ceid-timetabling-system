@@ -19,4 +19,12 @@ public interface TimetableAssignmentRepository extends JpaRepository<TimetableAs
     List<TimetableAssignment> findByTimeSlotId(Long timeSlotId);
     List<TimetableAssignment> findByTimetableIdAndAssignmentType(Long timetableId, TimetableAssignment.AssignmentType type);
     List<TimetableAssignment> findByIsLockedTrue();
+
+    /**
+     * S3e: αναθέσεις χωρίς snapshot (γραμμένες πριν το snapshot-on-write). Το
+     * snapshot_course_code είναι το sentinel — null ⇔ η course-ομάδα δεν stamp-αρίστηκε
+     * ποτέ. Τα EAGER course/room/timeSlot φορτώνονται μαζί, ώστε ο stamper να τρέχει
+     * και εκτός transaction (backfill runner). ΜΟΝΟ null rows → δεν αγγίζει frozen snapshots.
+     */
+    List<TimetableAssignment> findBySnapshotCourseCodeIsNull();
 }
