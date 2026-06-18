@@ -33,3 +33,18 @@ Two-worlds + silent-catch: το M2M loop στο buildTeacherKeyMap ήταν dead
 LazyInitializationException σιωπηλά swallowed → teacherKeys de-facto μόνο από
 teachers_text). Αιτιολόγηση task E. Διόρθωση: join-fetch findAllWithTeacherAndCourse,
 M2M authoritative + active filter, teachers_text deprecated fallback.
+
+### [d4b773a] S3a — snapshot-on-write: σχήμα + entity (V3)
+Θεμελίωση του invariant #1 (render-from-snapshot): 16 denormalized στήλες στο
+timetable_assignments (course code/name/εξάμηνο/έτος/τύπος, teachers_text, room
+code/name/χωρητικότητα/τύπος, slot ημέρα/ώρες/τύπος + specific_date & exam_period_label).
+Πλήρες snapshot σκόπιμα: χωρίς room capacity/type & course semester/year/type τα
+attributes γίνονται stale, και χωρίς date/period τα exam timetables σπάνε μετά από
+αλλαγή/διαγραφή live timeslot. Σχεδιαστικές επιλογές: (α) DDL-only/όλες nullable —
+κανένα data UPDATE στο migration· το backfill υπαρχόντων αναβάλλεται σε Java
+SnapshotBackfillRunner ώστε backfilled & newly-stamped να περνούν από το ΙΔΙΟ
+stampSnapshot (single source — η SQL δεν αναπαράγει το Java normalizeTeachersTextForDto).
+(β) VARCHAR = length πηγής (μηδέν truncation), teachers_text → TEXT αφού είναι
+Java-derived. (γ) enum-name πεδία ως String, ώστε το snapshot να μένει ανεξάρτητο
+από μελλοντικές αλλαγές enums. Επαλήθευση: ddl-auto=validate → ο Hibernate ελέγχει
+entity↔σχήμα στο boot (αναντιστοιχία = ρητή αποτυχία)· 77/77 πράσινα, Flyway v3 καθαρό.
