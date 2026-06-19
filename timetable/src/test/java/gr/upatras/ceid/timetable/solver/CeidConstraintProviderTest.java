@@ -51,6 +51,7 @@ class CeidConstraintProviderTest {
         TeacherAvailabilityConstraints.BLOCKED_SLOTS = Map.of();
         TeacherAvailabilityConstraints.PREFERRED_SLOTS = Map.of();
         RoomAvailabilityConstraints.BLOCKED_SLOTS = Map.of();
+        SolverWeights.resetToDefaults();
     }
 
     // ---------- HARD ----------

@@ -57,7 +57,7 @@ public Constraint[] defineConstraints(ConstraintFactory factory) {
                         a.getTimeSlot() != null
                         && !a.getCourseId().equals(b.getCourseId())
                         && a.sharesTeacher(b))
-                .penalize(HardSoftScore.ONE_HARD)
+                .penalize(SolverWeights.hard("EXAM_TEACHER_CONFLICT"))
                 .asConstraint("Exam teacher conflict");
     }
 
@@ -78,7 +78,7 @@ Constraint requiredSameYearSameDay(ConstraintFactory factory) {
                     && a.isRequired()
                     && b.isRequired()
                     && !a.getCourseId().equals(b.getCourseId()))
-            .penalize(HardSoftScore.ofHard(5))
+            .penalize(SolverWeights.hard("EXAM_REQUIRED_SAME_YEAR_SAME_DAY"))
             .asConstraint("Required same-year exams on same day");
 }
 
@@ -89,7 +89,7 @@ Constraint requiredSameYearSameDay(ConstraintFactory factory) {
     Constraint roomBlockedSlot(ConstraintFactory factory) {
         return factory.forEach(Lesson.class)
                 .filter(RoomAvailabilityConstraints::isBlockedExam)
-                .penalize(HardSoftScore.ofHard(10))
+                .penalize(SolverWeights.hard("EXAM_ROOM_BLOCKED"))
                 .asConstraint("Exam room blocked slot");
     }
 
@@ -106,7 +106,7 @@ Constraint requiredSameYearSameDay(ConstraintFactory factory) {
         return factory.forEach(Lesson.class)
                 .filter(l -> l.getRoom() != null && l.hasRoomPreference()
                         && !l.getPreferredRoomCodes().contains(l.getRoom().getCode()))
-                .penalize(HardSoftScore.ofSoft(4))
+                .penalize(SolverWeights.soft("EXAM_PREFERRED_ROOM"))
                 .asConstraint("Preferred exam room");
     }
 
@@ -115,7 +115,7 @@ Constraint requiredSameYearSameDay(ConstraintFactory factory) {
         return factory.forEach(Lesson.class)
                 .filter(l -> l.getTimeSlot() != null && l.hasHourPreference()
                         && !l.getPreferredStartHours().contains(l.getTimeSlot().getStartHour()))
-                .penalize(HardSoftScore.ofSoft(4))
+                .penalize(SolverWeights.soft("EXAM_PREFERRED_HOUR"))
                 .asConstraint("Preferred exam start hour");
     }
 
@@ -135,7 +135,7 @@ Constraint requiredSameYearSameDay(ConstraintFactory factory) {
                 .filter((room, slot, totalStudents) ->
                         room.getCapacity() > 0 && totalStudents > room.getCapacity())
                 .penalize(HardSoftScore.ONE_SOFT,
-                        (room, slot, totalStudents) -> totalStudents - room.getCapacity())
+                        (room, slot, totalStudents) -> SolverWeights.w("EXAM_SHARED_ROOM_CAPACITY") * (totalStudents - room.getCapacity()))
                 .asConstraint("Shared exam room over capacity");
     }
 
@@ -155,7 +155,7 @@ Constraint spreadSameYear(ConstraintFactory factory) {
                     && !a.getCourseId().equals(b.getCourseId())
                     && areConsecutiveDays(a.getTimeSlot().getDayKey(),
                                          b.getTimeSlot().getDayKey()))
-            .penalize(HardSoftScore.ONE_SOFT, (a, b) -> 3)
+            .penalize(HardSoftScore.ONE_SOFT, (a, b) -> SolverWeights.w("EXAM_SPREAD_SAME_YEAR"))
             .asConstraint("Spread same-year exams");
 }
 
@@ -171,7 +171,7 @@ Constraint spreadSameYear(ConstraintFactory factory) {
         && b.getTimeSlot() != null
         && !a.getCourseId().equals(b.getCourseId())
         && shareDirectionGroupA(a.getCourseCode(), b.getCourseCode()))
-                .penalize(HardSoftScore.ONE_SOFT, (a, b) -> 5)
+                .penalize(HardSoftScore.ONE_SOFT, (a, b) -> SolverWeights.w("EXAM_DIRECTION_GROUP_A_SAME_DAY"))
                 .asConstraint("Direction Group A exams on same day");
     }
 
@@ -187,7 +187,7 @@ Constraint spreadSameYear(ConstraintFactory factory) {
         && b.getTimeSlot() != null
         && !a.getCourseId().equals(b.getCourseId())
         && a.sharesTeacher(b))
-                .penalize(HardSoftScore.ONE_SOFT, (a, b) -> 2)
+                .penalize(HardSoftScore.ONE_SOFT, (a, b) -> SolverWeights.w("EXAM_TEACHER_MULTIPLE_SAME_DAY"))
                 .asConstraint("Teacher multiple exams same day");
     }
 
@@ -199,7 +199,7 @@ Constraint spreadSameYear(ConstraintFactory factory) {
                 .filter(l -> l.getTimeSlot() != null
                         && l.getExpectedStudents() > 150
                         && l.getTimeSlot().getStartHour() >= 15)
-                .penalize(HardSoftScore.ONE_SOFT, l -> 1)
+                .penalize(HardSoftScore.ONE_SOFT, l -> SolverWeights.w("EXAM_PREFER_MORNING_LARGE"))
                 .asConstraint("Prefer morning for large exams");
     }
 
@@ -220,7 +220,7 @@ Constraint spreadSameYear(ConstraintFactory factory) {
                         && b.getTimeSlot() != null
                         && !(a.isRequired() && b.isRequired())
                         && !a.getCourseId().equals(b.getCourseId()))
-                .penalize(HardSoftScore.ONE_SOFT, (a, b) -> 6)
+                .penalize(HardSoftScore.ONE_SOFT, (a, b) -> SolverWeights.w("EXAM_SAME_YEAR_SAME_DAY"))
                 .asConstraint("Same-year exams stacked on same day");
     }
 
@@ -236,7 +236,7 @@ Constraint spreadSameYear(ConstraintFactory factory) {
                         Joiners.equal(Lesson::getTimeSlot),
                         Joiners.equal(Lesson::getRoom))
                 .filter((a, b) -> a.getTimeSlot() != null && a.getRoom() != null)
-                .penalize(HardSoftScore.ONE_SOFT)
+                .penalize(SolverWeights.soft("EXAM_PREFER_DISTINCT_ROOMS"))
                 .asConstraint("Prefer distinct exam rooms within slot");
     }
 
@@ -253,7 +253,7 @@ Constraint spreadSameYear(ConstraintFactory factory) {
                         Joiners.equal(l -> l.getTimeSlot() != null
                                 ? l.getTimeSlot().getDayKey() : ""))
                 .filter((a, b) -> a.getTimeSlot() != null && b.getTimeSlot() != null)
-                .penalize(HardSoftScore.ONE_SOFT)
+                .penalize(SolverWeights.soft("EXAM_DAILY_LOAD_BALANCE"))
                 .asConstraint("Daily exam load balance");
     }
 
@@ -270,7 +270,7 @@ Constraint spreadSameYear(ConstraintFactory factory) {
                         && !el.isRequired()
                         && req.getTimeSlot().getDayKey()
                               .compareTo(el.getTimeSlot().getDayKey()) > 0)
-                .penalize(HardSoftScore.ONE_SOFT)
+                .penalize(SolverWeights.soft("EXAM_REQUIRED_BEFORE_ELECTIVES"))
                 .asConstraint("Required exams before electives");
     }
 

@@ -49,7 +49,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
                         Joiners.equal(Lesson::getTimeSlot),
                         Joiners.equal(Lesson::getRoom))
                 .filter((a, b) -> a.getTimeSlot() != null && a.getRoom() != null)
-                .penalize(HardSoftScore.ONE_HARD)
+                .penalize(SolverWeights.hard("WEEKLY_ROOM_CONFLICT"))
                 .asConstraint("Room conflict");
     }
 
@@ -60,7 +60,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
                         a.getTimeSlot() != null &&
                         !a.getCourseId().equals(b.getCourseId()) &&
                         a.sharesTeacher(b))
-                .penalize(HardSoftScore.ONE_HARD)
+                .penalize(SolverWeights.hard("WEEKLY_TEACHER_CONFLICT"))
                 .asConstraint("Teacher conflict");
     }
 
@@ -69,7 +69,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
                         Joiners.equal(Lesson::getCourseId),
                         Joiners.equal(Lesson::getTimeSlot))
                 .filter((a, b) -> a.getTimeSlot() != null)
-                .penalize(HardSoftScore.ONE_HARD)
+                .penalize(SolverWeights.hard("WEEKLY_SAME_COURSE_CONFLICT"))
                 .asConstraint("Same course conflict");
     }
 
@@ -81,14 +81,14 @@ public class CeidConstraintProvider implements ConstraintProvider {
                         a.getTimeSlot() != null &&
                         a.isRequired() && b.isRequired() &&
                         !a.getCourseId().equals(b.getCourseId()))
-                .penalize(HardSoftScore.ofHard(5))
+                .penalize(SolverWeights.hard("WEEKLY_REQUIRED_SAME_YEAR"))
                 .asConstraint("Required same-year conflict");
     }
 
     Constraint labInLabRoom(ConstraintFactory factory) {
         return factory.forEach(Lesson.class)
                 .filter(l -> l.isLab() && l.getRoom() != null && !l.getRoom().isLab())
-                .penalize(HardSoftScore.ONE_HARD)
+                .penalize(SolverWeights.hard("WEEKLY_LAB_IN_LAB_ROOM"))
                 .asConstraint("Lab must be in LAB room");
     }
 
@@ -98,7 +98,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
                         && (l.isLecture() || l.isTutorial())
                         && l.getRoom() != null
                         && !"Γ".equals(l.getRoom().getCode()))
-                .penalize(HardSoftScore.ONE_HARD)
+                .penalize(SolverWeights.hard("WEEKLY_FIRST_YEAR_ONLY_GAMMA"))
                 .asConstraint("First year only in room G");
     }
 
@@ -109,7 +109,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
                         && l.getRoom() != null
                         && !"Β".equals(l.getRoom().getCode())
                         && !"Γ".equals(l.getRoom().getCode()))
-                .penalize(HardSoftScore.ONE_HARD)
+                .penalize(SolverWeights.hard("WEEKLY_REQUIRED_ONLY_B_OR_G"))
                 .asConstraint("Required courses only in B or G");
     }
 
@@ -126,7 +126,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
                 .filter((studyYear, day, lectureCount) -> lectureCount > 6)
                 .penalize(
                         HardSoftScore.ONE_HARD,
-                        (studyYear, day, lectureCount) -> lectureCount - 6
+                        (studyYear, day, lectureCount) -> SolverWeights.w("WEEKLY_DAILY_LECTURE_LIMIT") * (lectureCount - 6)
                 )
                 .asConstraint("Daily lecture limit for required courses");
     }
@@ -144,7 +144,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
                         countDistinct(l -> l.getTimeSlot().getStartHour())
                 )
                 .filter((studyYear, day, occupiedLunchHours) -> occupiedLunchHours >= 3)
-                .penalize(HardSoftScore.ofHard(3))
+                .penalize(SolverWeights.hard("WEEKLY_LUNCH_BREAK"))
                 .asConstraint("Lunch break required for first three years");
     }
 
@@ -154,7 +154,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
         return factory.forEach(Lesson.class)
                 .filter(l -> l.getTimeSlot() != null)
                 .filter(TeacherAvailabilityConstraints::isBlocked)
-                .penalize(HardSoftScore.ofHard(10))
+                .penalize(SolverWeights.hard("WEEKLY_TEACHER_BLOCKED"))
                 .asConstraint("Teacher blocked slot");
     }
 
@@ -175,7 +175,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
                          l -> l.getTimeSlot().getDayOfWeek(),
                          ConstraintCollectors.toList())
                 .penalize(HardSoftScore.ONE_SOFT,
-                        (studyYear, day, lessons) -> dailyGapPenalty(lessons))
+                        (studyYear, day, lessons) -> SolverWeights.w("WEEKLY_REQUIRED_SAME_YEAR_GAPS") * dailyGapPenalty(lessons))
                 .asConstraint("Required same-year daily gaps");
     }
 
@@ -210,7 +210,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
     Constraint roomBlockedSlot(ConstraintFactory factory) {
         return factory.forEach(Lesson.class)
                 .filter(RoomAvailabilityConstraints::isBlockedWeekly)
-                .penalize(HardSoftScore.ofHard(10))
+                .penalize(SolverWeights.hard("WEEKLY_ROOM_BLOCKED"))
                 .asConstraint("Room blocked slot");
     }
 
@@ -220,14 +220,14 @@ public class CeidConstraintProvider implements ConstraintProvider {
         return factory.forEach(Lesson.class)
                 .filter(l -> l.getRoom() != null && l.getExpectedStudents() > l.getRoom().getCapacity())
                 .penalize(HardSoftScore.ONE_SOFT,
-                        l -> l.getExpectedStudents() - l.getRoom().getCapacity())
+                        l -> SolverWeights.w("WEEKLY_ROOM_CAPACITY") * (l.getExpectedStudents() - l.getRoom().getCapacity()))
                 .asConstraint("Room capacity exceeded");
     }
 
     Constraint preferNormalHours(ConstraintFactory factory) {
         return factory.forEach(Lesson.class)
                 .filter(l -> l.getTimeSlot() != null && l.getTimeSlot().getStartHour() >= 18)
-                .penalize(HardSoftScore.ONE_SOFT, l -> 2)
+                .penalize(HardSoftScore.ONE_SOFT, l -> SolverWeights.w("WEEKLY_PREFER_NORMAL_HOURS"))
                 .asConstraint("Prefer normal hours");
     }
 
@@ -241,7 +241,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
                 )
                 .filter((studyYear, day, lectureCount) -> lectureCount > 4)
                 .penalize(HardSoftScore.ONE_SOFT,
-                        (studyYear, day, lectureCount) -> lectureCount - 4)
+                        (studyYear, day, lectureCount) -> SolverWeights.w("WEEKLY_AVOID_OVERLOADED_DAY") * (lectureCount - 4))
                 .asConstraint("Avoid overloaded day");
     }
 
@@ -249,7 +249,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
         return factory.forEach(Lesson.class)
                 .filter(l -> l.getTimeSlot() != null)
                 .filter(TeacherAvailabilityConstraints::isNotPreferred)
-                .penalize(HardSoftScore.ONE_SOFT, l -> 3)
+                .penalize(HardSoftScore.ONE_SOFT, l -> SolverWeights.w("WEEKLY_TEACHER_PREFERRED"))
                 .asConstraint("Teacher not in preferred slot");
     }
 
@@ -264,7 +264,7 @@ public class CeidConstraintProvider implements ConstraintProvider {
                         a.getTimeSlot() != null
                         && !a.getCourseId().equals(b.getCourseId())
                         && shareDirectionGroupA(a.getCourseCode(), b.getCourseCode()))
-                .penalize(HardSoftScore.ONE_SOFT, (a, b) -> 5)
+                .penalize(HardSoftScore.ONE_SOFT, (a, b) -> SolverWeights.w("WEEKLY_DIRECTION_GROUP_A"))
                 .asConstraint("Direction Group A conflict");
     }
 

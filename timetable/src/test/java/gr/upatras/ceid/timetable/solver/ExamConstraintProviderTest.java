@@ -46,6 +46,7 @@ class ExamConstraintProviderTest {
     @AfterEach
     void resetStaticRegistries() {
         RoomAvailabilityConstraints.BLOCKED_SLOTS = Map.of();
+        SolverWeights.resetToDefaults();
     }
 
     // ---------- HARD ----------
