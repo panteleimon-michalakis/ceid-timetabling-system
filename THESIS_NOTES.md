@@ -239,3 +239,70 @@ task E), τα fixtures αυτά θα χρειαστούν τη membership **δι
 
 Verification: solver-only `*ConstraintProviderTest` 52/52, full suite **105/105**
 πράσινο, `BUILD SUCCESS`.
+
+### [06e2df9 + 938c74f + ba32eba] S4b — data-driven constraint weights (externalize → persist → overlay)
+Τα **31 βάρη** των solver constraints (17 weekly + 14 exam) έγιναν editable/data-driven
+**χωρίς καμία αλλαγή συμπεριφοράς** (seed = ακριβώς τα σημερινά literals).
+
+ΕΠΙΛΟΓΗ ΜΗΧΑΝΙΣΜΟΥ — **Option B** (custom weight holder `SolverWeights` + overlay-on-
+defaults) αντί native `@ConstraintConfiguration`. Αιτιολογία: (α) ελάχιστο test churn —
+defaults=literals → τα 52 verifier μένουν αυτούσια· (β) ομοιογένεια με τα υπάρχοντα
+availability registries (`TeacherAvailabilityConstraints`/`RoomAvailabilityConstraints`,
+ίδιο overlay-on-defaults μοτίβο)· (γ) position-preserving· (δ) το **Timefold 1.11 ΔΕΝ έχει
+`ConstraintWeightOverrides`** — επιβεβαιωμένο από το jar του core (μόνο
+`@ConstraintConfiguration`/`@ConstraintWeight` υπάρχουν). Documented upgrade path:
+`@ConstraintConfiguration` ή `ConstraintWeightOverrides` μετά από version bump — η μετάβαση
+είναι μηχανική (το βάρος ήδη εξωτερικευμένο σε keys). Το per-constraint score breakdown για
+demo/αξιολόγηση παραμένει διαθέσιμο μέσω `ScoreManager`/`ConstraintMatchTotal`, ανεξάρτητο
+του μηχανισμού βαρών.
+
+ΑΡΧΙΤΕΚΤΟΝΙΚΗ (3 βήματα):
+- **S4b-1 (06e2df9) — externalize:** `SolverWeights` ως single source· 31 keys, **defaults ==
+  τα προηγούμενα literals**. Position-preserving rewire των 31 `penalize()`: «Στυλ-1» (βάρος
+  στο base score) → `hard()`/`soft()`· «Στυλ-2» (βάρος στον weigher) → base `ONE_*` +
+  `w()*<φόρμουλα>`. **Δεν μετακινήθηκε βάρος base↔weigher** (βλ. S4a §SEMANTICS NUANCE) → τα
+  νούμερα των verifier tests αμετάβλητα. Φρουρός: τα characterization tests του S4a + τα 52
+  verifier αυτούσια. `resetToDefaults()` στα 2 `@AfterEach` (forward-safety για το overlay).
+- **S4b-2a (938c74f) — persist:** `SolverWeights` → πλήρες **catalog** (record `Def`:
+  key/scope/level/defaultWeight/ελληνικό label/περιγραφή· τα defaults παράγονται ΑΠΟ το
+  catalog). Entity `ConstraintWeightConfig` + **V4** (additive `CREATE TABLE`, UNIQUE
+  `constraint_key`, `jsonb params`, `timestamptz` created/updated) + idempotent **insert-if-
+  absent** seeder (`ConstraintWeightSeeder`, `@Order(50)`, SLF4J — όχι `System.out`, μάθαμε
+  από το S3e mojibake). Ο solver **ΑΚΟΜΑ στα defaults** — `loadConstraintsFromDb` άθικτο,
+  μηδενική αλλαγή solve (ίδιο idiom με V3/SnapshotBackfillRunner: DDL-only migration, seed σε
+  Java). Νέο έδαφος για τον κώδικα: πρώτη χρήση jsonb + Hibernate `@CreationTimestamp/
+  @UpdateTimestamp` — το `ddl-auto=validate` πέρασε καθαρά (Flyway v4 + entity ↔ σχήμα).
+- **S4b-2b (ba32eba) — overlay:** `applyConstraintWeightOverrides()` (package-private,
+  testable — precedent S2/S3d) στην **ΑΡΧΗ** του `loadConstraintsFromDb()`. **ΚΡΙΣΙΜΟ:** το
+  method έχει `if (dbConstraints.isEmpty()) return;` early-return — άρα η κλήση ΠΡΕΠΕΙ να μπει
+  πριν, αλλιώς θα παρακαμπτόταν όταν δεν υπάρχουν teacher constraints. `resetToDefaults()`
+  ΠΡΩΤΑ → idempotent per-solve (αλλαγή & επαναφορά βάρους στη ΒΔ αντικατοπτρίζεται σωστά).
+  Εδώ ο solver αρχίζει να διαβάζει τα persisted βάρη.
+
+POLICY (κλειδωμένη — recon §D): `score_level` **read-only** (διαβάζεται μόνο για το διαχωρισμό
+HARD-floor vs SOFT-disable)· **HARD-floor**: disabled ή weight<1 → fallback στο code default —
+ΠΟΤΕ σιωπηλή απώλεια hard κανόνα· **SOFT-disable**: disabled → βάρος 0. Safety: orphan/unknown
+key (stale row μετά από κατάργηση κανόνα) → `log.warn` + skip, ΔΕΝ σπάει το solve.
+
+SINGLE SOURCE OF TRUTH: το catalog (`SolverWeights`) τροφοδοτεί **και** τα call sites των
+providers **και** τον seeder (DB) **και** το overlay (read-back) → κανένα drift
+literal↔seed↔provider, μία πηγή ανά βάρος. Acceptance: 31 catalog keys ≡ 31 provider keys
+(grep + test).
+
+VERIFICATION: 52 verifier **αυτούσια** (defaults=literals, δεν χτυπούν DB· @AfterEach reset)·
+`ConstraintWeightSeederTest` (clean→**31** με catalog defaults / idempotent / δεν επαναφέρει
+admin edit)· `ConstraintWeightOverlayTest` **6 σενάρια** (no-op defaults / SOFT change+disable→0
+/ HARD floor disable+zero→default / HARD raise)· **ΡΗΤΟ baseline** (throwaway full FALL solve με
+seeded defaults) → **266/266 @ hard 0** μετά το overlay = ίδιο με το documented baseline. Full
+suite **114/114**.
+
+ΕΓΚΡΙΣΗ ΕΠΙΒΛΕΠΟΝΤΑ: S4b = **μηχανισμός, ΜΗΔΕΝΙΚΗ αλλαγή τιμών** (baseline αμετάβλητο by
+construction). Έγκριση βαρών χρειάζεται μόνο (α) όταν ο admin επεξεργαστεί τιμή μέσω UI, (β) για
+τα 2 νέα βάρη του Direction (S5). Ο πλήρης **πίνακας 31 βαρών** στο catalog = official baseline
+προς έγκριση (κανόνας #4, ιεραρχία βαρών).
+
+FORWARD / DEBT: το static `WEIGHTS` είναι ασφαλές **όσο τα solves είναι σειριακά** (ένα
+`SolverFactory` ανά solve)· όταν έρθει ο async solver (**A10**), το `WEIGHTS` + τα 3 availability
+registries πρέπει να **de-static-οποιηθούν ΜΑΖΙ** (κοινό global-state debt). **BL-10:** dead-code
+— 2 constraint methods στο `TeacherAvailabilityConstraints` (διπλότυπα των wired κανόνων του
+`CeidConstraintProvider`, εντοπίστηκαν στο S4b-1) → cleanup σε B-φάση.
