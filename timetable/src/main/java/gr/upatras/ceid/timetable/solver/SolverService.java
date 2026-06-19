@@ -31,6 +31,7 @@ public class SolverService {
     private final TeacherConstraintRepository constraintRepo;
     private final RoomConstraintRepository roomConstraintRepo;
     private final SolutionPersistenceService solutionPersistence;
+    private final ConstraintWeightConfigRepository cwcRepo;
 
     public SolverService(CourseRepository courseRepo, RoomRepository roomRepo,
                          TimeSlotRepository timeSlotRepo, TimetableRepository timetableRepo,
@@ -38,7 +39,8 @@ public class SolverService {
                          CourseTeacherRepository courseTeacherRepo,
                          TeacherConstraintRepository constraintRepo,
                          RoomConstraintRepository roomConstraintRepo,
-                         SolutionPersistenceService solutionPersistence) {
+                         SolutionPersistenceService solutionPersistence,
+                         ConstraintWeightConfigRepository cwcRepo) {
         this.courseRepo = courseRepo;
         this.roomRepo = roomRepo;
         this.timeSlotRepo = timeSlotRepo;
@@ -48,6 +50,7 @@ public class SolverService {
         this.constraintRepo = constraintRepo;
         this.roomConstraintRepo = roomConstraintRepo;
         this.solutionPersistence = solutionPersistence;
+        this.cwcRepo = cwcRepo;
     }
 
     public Map<String, Object> solve(Long timetableId, int timeLimitSeconds) {
@@ -535,7 +538,39 @@ private String hardScoreName(HardSoftScore score) {
     return score.hardScore() < 0 ? "SOLVED_WITH_HARD_CONFLICTS" : "SOLVED";
 }
 
+/**
+     * S4b-2b: overlay των persisted (editable) βαρών πάνω στα code defaults του
+     * SolverWeights, per-solve (καλείται από το loadConstraintsFromDb() πριν χτιστεί
+     * το CeidTimetable). Με seeded defaults είναι no-op (baseline αμετάβλητο)·
+     * ενεργοποιείται μόνο σε admin edits.
+     *
+     * Policy (κλειδωμένη — βλ. recon §D):
+     *  - resetToDefaults() ΠΡΩΤΑ → idempotent per-solve (αλλαγή & επαναφορά βάρους
+     *    στη ΒΔ αντικατοπτρίζεται σωστά).
+     *  - HARD: enabled locked & weight>=1. disable ή weight<1 → fallback στο code
+     *    default — ΠΟΤΕ σιωπηλή απώλεια hard κανόνα.
+     *  - SOFT: disable → βάρος 0· αλλιώς το weight.
+     *  - score_level read-only (μόνο διαβάζεται για HARD-floor vs SOFT-disable).
+     * Package-private για στοχευμένο test (precedent: buildTeacherKeyMap/S2, assignmentToDto/S3d).
+     */
+    void applyConstraintWeightOverrides() {
+        SolverWeights.resetToDefaults();              // κάθε solve ξεκινά καθαρό
+        for (ConstraintWeightConfig c : cwcRepo.findAll()) {
+            if ("HARD".equals(c.getScoreLevel())) {
+                // HARD δεν απενεργοποιείται/μηδενίζεται ποτέ — fallback στο default.
+                if (c.isEnabled() && c.getWeight() >= 1) {
+                    SolverWeights.applyOverride(c.getConstraintKey(), c.getWeight());
+                }
+            } else {
+                // SOFT: disable επιτρέπεται → βάρος 0· αλλιώς το weight.
+                SolverWeights.applyOverride(c.getConstraintKey(),
+                        c.isEnabled() ? c.getWeight() : 0);
+            }
+        }
+    }
+
 private void loadConstraintsFromDb() {
+        applyConstraintWeightOverrides();
         loadRoomConstraintsFromDb();
         TeacherAvailabilityRegistry.load();
 

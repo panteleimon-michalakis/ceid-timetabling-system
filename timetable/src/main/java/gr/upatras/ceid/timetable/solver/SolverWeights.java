@@ -1,6 +1,8 @@
 package gr.upatras.ceid.timetable.solver;
 
 import ai.timefold.solver.core.api.score.buildin.hardsoft.HardSoftScore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -33,6 +35,8 @@ import java.util.Map;
 public final class SolverWeights {
 
     private SolverWeights() {}
+
+    private static final Logger log = LoggerFactory.getLogger(SolverWeights.class);
 
     /**
      * Μεταδεδομένα ενός constraint κανόνα (immutable).
@@ -187,6 +191,20 @@ public final class SolverWeights {
             throw new IllegalArgumentException("Unknown constraint weight key: " + key);
         }
         return v;
+    }
+
+    /**
+     * S4b-2b: επικάλυψη του βάρους ενός κανόνα από persisted (DB) τιμή, per-solve.
+     * Άγνωστο key (π.χ. stale row μετά από κατάργηση κανόνα) → log.warn + skip:
+     * ένα orphan row ΔΕΝ πρέπει να σπάει το solve. Το WEIGHTS παραμένει το ίδιο
+     * mutable map· {@link #resetToDefaults()} επαναφέρει στα defaults.
+     */
+    public static void applyOverride(String key, int weight) {
+        if (!WEIGHTS.containsKey(key)) {
+            log.warn("Ignoring weight override for unknown constraint key: {}", key);
+            return;
+        }
+        WEIGHTS.put(key, weight);
     }
 
     /** HARD score στο βάρος του κανόνα (για base-score constraints, «Στυλ-1»). */
