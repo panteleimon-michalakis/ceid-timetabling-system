@@ -194,3 +194,48 @@ assignments, WiringTest prefill). Επιβεβαιωμένο: full suite **99/99
 **S3 (snapshot-on-write) ΟΛΟΚΛΗΡΩΜΕΝΟ** (S3a→S3e): schema/entity → single source →
 4 write-paths (incl. atomic solver persistence/BL-1) → render snapshot-first →
 backfill. Invariant #1 (render-from-snapshot) ενεργό end-to-end.
+
+### [ffbf699] S4a — characterization tests (pin current behavior) πριν τον weight refactor
+Πρώτο βήμα του S4 (data-driven constraint weights): **regression guard ΠΡΙΝ** αγγίξουμε
+τον μηχανισμό βαρών. 6 νέα ConstraintVerifier tests (2/κανόνα — positive + boundary/
+negative) για τα 3 constraints που ήταν **χωρίς κάλυψη**: `sameCourseConflict` (HARD,
+weekly), `avoidOverloadedDay` (SOFT, weekly), `directionGroupADifferentDays` (SOFT,
+exam). Verifier 46→52, full suite 99→105, **+61/−0 production lines** (tests-only,
+κανένα υπάρχον test ή production γραμμή δεν άλλαξε).
+
+ΜΕΘΟΔΟΛΟΓΙΑ — characterization testing: «κλειδώνουμε» την ΑΚΡΙΒΗ τρέχουσα ποινή κάθε
+κανόνα ΠΡΙΝ τον S4b (externalization βαρών). Επειδή στο S4b τα defaults θα είναι ίδια με
+τα σημερινά literals, ο refactor γίνεται **provably behavior-preserving**: κάθε υπάρχον
+verifier test ΠΡΕΠΕΙ να μείνει πράσινο αυτούσιο — λειτουργεί ως tripwire που πιάνει κάθε
+ακούσια μεταβολή ποινής. Τα 3 «τυφλά» constraints αποκτούν baseline πρώτα, ώστε να μην
+μπει ο S4b με κανόνες που κανένα test δεν φρουρεί. Τεχνική: characterization / golden-
+master tests ως ασφαλές δίχτυ refactor σε υπάρχοντα κώδικα (Feathers, *Working
+Effectively with Legacy Code*).
+
+PINNED VALUES (τρέχουσα συμπεριφορά, όχι «ιδανική»):
+- `sameCourseConflict`: `ONE_HARD` ×1 → `penalizesBy(1)`/ζεύγος (join courseId+timeSlot)·
+  boundary: ίδιο course σε άλλα slots → 0.
+- `avoidOverloadedDay`: `ONE_SOFT`, weigher = `count−4` για >4 required lectures ανά
+  (έτος, μέρα)· positive 5 → 1, boundary ακριβώς 4 → 0.
+- `directionGroupADifferentDays`: `ONE_SOFT` ×5/ζεύγος όταν δύο εξετάσεις ίδιας Ομάδας Α
+  πέφτουν ίδια ημ/νία· boundary: ίδια μαθήματα άλλες μέρες → 0.
+
+SEMANTICS NUANCE (για το γραπτό): το `penalizesBy(n)` του ConstraintVerifier μετρά το
+ΣΥΝΟΛΙΚΟ match-weight (Σ των weigher outputs), **ΟΧΙ** το base ConstraintWeight. Γι' αυτό
+στον κώδικα συνυπάρχουν δύο στυλ: «Στυλ-1» (βάρος στο base score, π.χ. `ofHard(5)`,
+weigher=1) ελέγχεται με `penalizesBy(1)`/match, ενώ «Στυλ-2» (βάρος στον weigher, π.χ.
+`(a,b)->5`, base=`ONE_*`) με `penalizesBy(5)`. Κρίσιμο για τον S4b: αν ο refactor
+μετακινήσει βάρος base↔weigher (π.χ. ofSoft(5)+weigher 1 αντί ONE_SOFT+weigher 5), τα
+νούμερα των tests αλλάζουν **σιωπηλά** ενώ η συνολική ποινή μένει ίδια — άρα η
+externalization πρέπει να διατηρεί τη θέση του βάρους, αλλιώς το «behavior-preserving»
+είναι φαινομενικό.
+
+S5 COUPLING (risk προς θύμηση): τα direction tests κουμπώνουν στο **hardcoded**
+`DirectionRegistry.GROUP_A` (Κ1: CEID_NE5057, CEID_NE4168 — από τα ίδια fixtures του
+υπάρχοντος weekly directionGroupA test). Όταν ο S5 μεταφέρει τη membership μαθήματος→
+κατεύθυνσης σε `Direction` entity + `course_directions` (M2M, αντικαθιστά το registry —
+task E), τα fixtures αυτά θα χρειαστούν τη membership **διαθέσιμη χωρίς DB** (seed/fixture
+μέσα στον ConstraintVerifier), αλλιώς θα σπάσουν ή θα γίνουν no-op.
+
+Verification: solver-only `*ConstraintProviderTest` 52/52, full suite **105/105**
+πράσινο, `BUILD SUCCESS`.
