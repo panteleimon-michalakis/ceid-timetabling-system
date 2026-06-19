@@ -152,6 +152,24 @@ class ExamConstraintProviderTest {
     }
 
     @Test
+    void directionGroupADifferentDays_twoK1ExamsSameDay_penalizedByFive() {
+        // Δύο μαθήματα Ομάδας Α της ίδιας κατεύθυνσης (Κ1) εξετάζονται την
+        // ίδια ημερομηνία (έστω σε άλλο 3ωρο) → ποινή 5.
+        Lesson a = exam(1, "CEID_NE5057", 4, "ELECTIVE", 60, examSlot(10, "2026-09-01", 9), BETA, "T1|A");
+        Lesson b = exam(2, "CEID_NE4168", 4, "ELECTIVE", 60, examSlot(11, "2026-09-01", 12), GAMMA, "T2|B");
+        verifier.verifyThat(ExamConstraintProvider::directionGroupADifferentDays)
+                .given(a, b).penalizesBy(5);
+    }
+
+    @Test
+    void directionGroupADifferentDays_k1ExamsDifferentDays_notPenalized() {
+        Lesson a = exam(1, "CEID_NE5057", 4, "ELECTIVE", 60, examSlot(10, "2026-09-01", 9), BETA, "T1|A");
+        Lesson b = exam(2, "CEID_NE4168", 4, "ELECTIVE", 60, examSlot(12, "2026-09-03", 9), GAMMA, "T2|B");
+        verifier.verifyThat(ExamConstraintProvider::directionGroupADifferentDays)
+                .given(a, b).penalizesBy(0);
+    }
+
+    @Test
     void preferMorningForLargeCourses_largeExamAfternoonPenalized() {
         Lesson l = exam(1, "C1", 1, "REQUIRED", 200, examSlot(10, "2026-09-01", 15), GAMMA, "T1|A");
         verifier.verifyThat(ExamConstraintProvider::preferMorningForLargeCourses)

@@ -94,6 +94,25 @@ class CeidConstraintProviderTest {
     }
 
     @Test
+    void sameCourseConflict_twoHoursSameCourseSameSlot_penalized() {
+        // Δύο ώρες του ΙΔΙΟΥ μαθήματος στο ίδιο slot (έστω σε άλλη αίθουσα):
+        // το ίδιο μάθημα δεν γίνεται να διδάσκεται ταυτόχρονα δύο φορές.
+        SolverTimeSlot ts = slot(10, "MONDAY", 9);
+        Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, ts, BETA, "T1|A");
+        Lesson b = lesson(1, "C1", 2, "REQUIRED", "TUTORIAL", 100, ts, GAMMA, "T2|B");
+        verifier.verifyThat(CeidConstraintProvider::sameCourseConflict)
+                .given(a, b).penalizesBy(1);
+    }
+
+    @Test
+    void sameCourseConflict_sameCourseDifferentSlots_notPenalized() {
+        Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(10, "MONDAY", 9), BETA, "T1|A");
+        Lesson b = lesson(1, "C1", 2, "REQUIRED", "TUTORIAL", 100, slot(11, "MONDAY", 10), GAMMA, "T2|B");
+        verifier.verifyThat(CeidConstraintProvider::sameCourseConflict)
+                .given(a, b).penalizesBy(0);
+    }
+
+    @Test
     void requiredSameYearConflict_singleMatch() {
         SolverTimeSlot ts = slot(10, "TUESDAY", 11);
         Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, ts, BETA, "T1|A");
@@ -263,6 +282,30 @@ class CeidConstraintProviderTest {
         Lesson l = lesson(1, "C1", 4, "ELECTIVE", "LECTURE", 60, slot(10, "FRIDAY", 19), D1, "T1|A");
         verifier.verifyThat(CeidConstraintProvider::preferNormalHours)
                 .given(l).penalizesBy(2);
+    }
+
+    @Test
+    void avoidOverloadedDay_fiveRequiredLecturesSameDay_penalizedByOne() {
+        // 5 υποχρεωτικές διαλέξεις ίδιου έτους/μέρας → υπέρβαση ορίου 4 κατά 1.
+        Lesson[] lessons = new Lesson[5];
+        for (int i = 0; i < 5; i++) {
+            lessons[i] = lesson(100 + i, "C" + i, 2, "REQUIRED", "LECTURE", 100,
+                    slot(20 + i, "MONDAY", 9 + i), BETA, "T" + i + "|X");
+        }
+        verifier.verifyThat(CeidConstraintProvider::avoidOverloadedDay)
+                .given((Object[]) lessons).penalizesBy(1); // 5 - 4 = 1
+    }
+
+    @Test
+    void avoidOverloadedDay_fourLecturesAtThreshold_notPenalized() {
+        // Ακριβώς 4 διαλέξεις = όριο, όχι υπέρβαση → καμία ποινή.
+        Lesson[] lessons = new Lesson[4];
+        for (int i = 0; i < 4; i++) {
+            lessons[i] = lesson(100 + i, "C" + i, 2, "REQUIRED", "LECTURE", 100,
+                    slot(20 + i, "MONDAY", 9 + i), BETA, "T" + i + "|X");
+        }
+        verifier.verifyThat(CeidConstraintProvider::avoidOverloadedDay)
+                .given((Object[]) lessons).penalizesBy(0); // 4 δεν είναι > 4
     }
 
     @Test
