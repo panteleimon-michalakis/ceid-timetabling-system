@@ -9,6 +9,7 @@ import WeeklyTimetable from './pages/WeeklyTimetable';
 import ExamTimetable from './pages/ExamTimetable';
 import Teachers from './pages/Teachers';
 import StudentView from './pages/StudentView';
+import PublicStudentView from './pages/PublicStudentView';
 import Users from './pages/Users';
 
 // ─── PrivateRoute — redirect στο /login αν δεν είσαι authenticated ────────────
@@ -90,6 +91,8 @@ function AppRoutes() {
       <Route path="/login" element={
         isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />
       } />
+      {/* Δημόσια account-less προβολή — ΕΚΤΟΣ PrivateRoute/Navbar, χωρίς token */}
+      <Route path="/public" element={<PublicStudentView />} />
       {/* Όλα τα άλλα → protected */}
       <Route path="/*" element={
         <PrivateRoute>
