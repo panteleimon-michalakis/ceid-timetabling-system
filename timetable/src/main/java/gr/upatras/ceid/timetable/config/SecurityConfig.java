@@ -100,6 +100,10 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.PUT,    "/api/timeslots/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/api/timeslots/**").hasRole("ADMIN")
 
+                // ── Δημόσια ανάγνωση (account-less): ΜΟΝΟ GET στο /api/public/** ─
+                // Non-GET στο /api/public/** πέφτει στο anyRequest().authenticated().
+                .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
+
                 // ── Ανάγνωση: όλοι οι συνδεδεμένοι ──────────────────────
                 .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
 
