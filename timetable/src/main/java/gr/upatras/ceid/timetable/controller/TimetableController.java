@@ -273,10 +273,17 @@ try {
     return badRequest("Μη έγκυρος τύπος ανάθεσης: " + assignmentTypeText);
 }
 
-        ResponseEntity<?> validationError = validateAssignment(timetable, course, room, timeSlot, assignmentType);
-        if (validationError != null) {
-            return validationError;
+        // HARD structural gate — εξακολουθεί να μπλοκάρει (#1/#3/#4)
+        ResponseEntity<?> structuralError = validateStructural(timetable, course, room, timeSlot, assignmentType);
+        if (structuralError != null) {
+            return structuralError;
         }
+        // Advisory (non-blocking): πρώτη scheduling-constraint παραβίαση, υπολογισμένη ΠΡΙΝ το save
+        // (ώστε η νέα ανάθεση να μη μετράει ως σύγκρουση με τον εαυτό της).
+        ResponseEntity<?> advisory = validateAssignment(timetable, course, room, timeSlot, assignmentType);
+        List<String> warnings = (advisory != null)
+                ? List.of(getValidationErrorText(advisory))
+                : List.of();
 
 Object lockedValue = body.get("isLocked");
 boolean locked = Boolean.TRUE.equals(lockedValue)
@@ -300,7 +307,10 @@ boolean locked = Boolean.TRUE.equals(lockedValue)
 
         snapshotStamper.stamp(assignment);
         TimetableAssignment saved = assignmentRepo.save(assignment);
-        return ResponseEntity.ok(assignmentToDto(saved));
+        // NB: το request param λέγεται ήδη `body` → χρησιμοποιούμε διαφορετικό όνομα.
+        Map<String, Object> responseBody = assignmentToDto(saved);   // φρέσκο mutable map
+        responseBody.put("warnings", warnings);
+        return ResponseEntity.ok(responseBody);
     }
 
     @DeleteMapping("/assignments/{assignmentId}")
@@ -1506,7 +1516,20 @@ private boolean isExamTimetable(Timetable timetable) {
             targetRoom = roomOpt.get();
         }
 
-        ResponseEntity<?> validationError = validateAssignment(
+        // HARD structural gate (#1/#3/#4) — structural checks δεν χρειάζονται ignoredId
+        ResponseEntity<?> structuralError = validateStructural(
+                assignment.getTimetable(),
+                assignment.getCourse(),
+                targetRoom,
+                targetTimeSlot,
+                assignment.getAssignmentType()
+        );
+        if (structuralError != null) {
+            return structuralError;
+        }
+        // Advisory (non-blocking) με ignoredAssignmentId = self (να μη συγκρούεται με την
+        // τρέχουσα θέση του), υπολογισμένο ΠΡΙΝ το mutate/save.
+        ResponseEntity<?> advisory = validateAssignment(
                 assignment.getTimetable(),
                 assignment.getCourse(),
                 targetRoom,
@@ -1514,10 +1537,9 @@ private boolean isExamTimetable(Timetable timetable) {
                 assignment.getAssignmentType(),
                 assignment.getId()
         );
-
-        if (validationError != null) {
-            return validationError;
-        }
+        List<String> warnings = (advisory != null)
+                ? List.of(getValidationErrorText(advisory))
+                : List.of();
 
         assignment.setRoom(targetRoom);
         assignment.setTimeSlot(targetTimeSlot);
@@ -1532,7 +1554,10 @@ private boolean isExamTimetable(Timetable timetable) {
             return badRequest("\u03a3\u03c6\u03ac\u03bb\u03bc\u03b1 \u03ba\u03b1\u03c4\u03ac \u03c4\u03b7\u03bd \u03b1\u03c0\u03bf\u03b8\u03ae\u03ba\u03b5\u03c5\u03c3\u03b7.");
         }
 
-        return ResponseEntity.ok(assignmentToDto(refreshed.get()));
+        // NB: \u03c4\u03bf request param \u03bb\u03ad\u03b3\u03b5\u03c4\u03b1\u03b9 \u03ae\u03b4\u03b7 `body` \u2192 \u03c7\u03c1\u03b7\u03c3\u03b9\u03bc\u03bf\u03c0\u03bf\u03b9\u03bf\u03cd\u03bc\u03b5 \u03b4\u03b9\u03b1\u03c6\u03bf\u03c1\u03b5\u03c4\u03b9\u03ba\u03cc \u03cc\u03bd\u03bf\u03bc\u03b1.
+        Map<String, Object> responseBody = assignmentToDto(refreshed.get());
+        responseBody.put("warnings", warnings);
+        return ResponseEntity.ok(responseBody);
     }
 
     // =========================================================
@@ -1829,6 +1854,71 @@ if (examTimetable
 
     return null;
 }
+
+    // =========================================================
+    // STRUCTURAL VALIDATION (HARD-only) — Feature #2 (non-blocking manual editing)
+    // =========================================================
+    // Τρέχει ΜΟΝΟ τους 3 structural/data-integrity ελέγχους (#1/#3/#4) που πρέπει
+    // να παραμείνουν HARD blocks (αλλιώς corrupt/un-renderable δεδομένα). Όλοι οι
+    // υπόλοιποι έλεγχοι (#2, #5–#16: room double-book, teacher conflict, year-room,
+    // όρια ωρών, lunch break κ.λπ.) είναι scheduling-constraints → advisory (μη
+    // μπλοκάρουν τη χειροκίνητη τοποθέτηση).
+    //
+    // ΣΥΝΕΙΔΗΤΗ μικρο-διπλασίαση: τα 3 check blocks είναι VERBATIM copies από το
+    // validateAssignment, το οποίο ΜΕΝΕΙ ανέπαφο (το χρησιμοποιεί advisory το
+    // getPlacementOptions, που χρειάζεται και τους 16 ελέγχους). DRY consolidation
+    // αργότερα (deferred — δεν αλλάζουμε το validateAssignment τώρα).
+    private ResponseEntity<?> validateStructural(
+            Timetable timetable,
+            Course course,
+            Room room,
+            TimeSlot timeSlot,
+            TimetableAssignment.AssignmentType assignmentType) {
+
+        // #1 — ελλιπή δεδομένα
+        if (timetable == null || course == null || room == null || timeSlot == null || assignmentType == null) {
+            return badRequest("Η ανάθεση έχει ελλιπή δεδομένα.");
+        }
+
+        boolean examTimetable = isExamTimetable(timetable);
+        boolean examAssignment = assignmentType == TimetableAssignment.AssignmentType.EXAM;
+
+        // #3 — type ↔ timetable συμβατότητα
+        if (examTimetable && !examAssignment) {
+            return badRequest("Σε πρόγραμμα εξεταστικής επιτρέπονται μόνο αναθέσεις τύπου EXAM.");
+        }
+
+        if (!examTimetable && examAssignment) {
+            return badRequest("Ανάθεση τύπου EXAM επιτρέπεται μόνο σε πρόγραμμα εξεταστικής.");
+        }
+
+        // #4 — exam-slot structural rules
+        if (examTimetable) {
+            if (timeSlot.getSlotType() != TimeSlot.SlotType.EXAM) {
+                return badRequest("Η εξέταση πρέπει να τοποθετηθεί σε χρονοθυρίδα τύπου EXAM.");
+            }
+
+            if (timeSlot.getSpecificDate() == null) {
+                return badRequest("Η χρονοθυρίδα εξέτασης πρέπει να έχει συγκεκριμένη ημερομηνία.");
+            }
+
+            if (timetable.getStartDate() != null
+                    && timeSlot.getSpecificDate().isBefore(timetable.getStartDate())) {
+                return badRequest("Η ημερομηνία της εξέτασης είναι πριν από την έναρξη της εξεταστικής.");
+            }
+
+            if (timetable.getEndDate() != null
+                    && timeSlot.getSpecificDate().isAfter(timetable.getEndDate())) {
+                return badRequest("Η ημερομηνία της εξέτασης είναι μετά από τη λήξη της εξεταστικής.");
+            }
+        } else {
+            if (timeSlot.getSlotType() == TimeSlot.SlotType.EXAM) {
+                return badRequest("Χρονοθυρίδα τύπου EXAM δεν μπορεί να χρησιμοποιηθεί σε πρόγραμμα εξαμήνου.");
+            }
+        }
+
+        return null;
+    }
 
     // =========================================================
     // SOLVER (Timefold)
