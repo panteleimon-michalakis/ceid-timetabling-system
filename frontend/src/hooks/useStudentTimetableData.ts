@@ -53,8 +53,9 @@ export function useStudentTimetableData(
   useEffect(() => { fetchList(); /* mount */ }, [fetchList]);
 
   useEffect(() => {
-    if (selectedTtId == null) return;
+    if (selectedTtId == null) { setAssignments([]); setLoading(false); return; }
     setLoading(true);
+    setAssignments([]);                       // clear-on-switch (parity· το polling refresh() ΔΕΝ περνά από εδώ → μένει smooth)
     fetchAssignments(selectedTtId).finally(() => setLoading(false));
   }, [selectedTtId, fetchAssignments]);
 
