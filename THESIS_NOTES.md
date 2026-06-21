@@ -366,3 +366,57 @@ FORWARD (Φ2): public frontend route **έξω** από `PrivateRoute`/`AuthProvi
 axios χωρίς τον `401 → redirect /login` interceptor (αλλιώς redirect-loop σε no-token call)
 + polling auto-update. Ανοιχτό spec-ερώτημα: ΔΕΝ υπάρχει single «current» flag — πολλά
 PUBLISHED μπορούν να συνυπάρχουν (η λίστα ταξινομείται `publishedAt DESC`· ο client επιλέγει).
+
+### [862402e · 1b0dfbf · 986ae90] PV-2 — frontend public route + single-source render + polling auto-update (Φάση 2/2)
+
+ΣΤΟΧΟΣ: account-less δημόσια προβολή στο `/public` — ο φοιτητής βλέπει/εκτυπώνει/εξάγει iCal
+το δημοσιευμένο πρόγραμμα **χωρίς login**, και η σελίδα **auto-ανανεώνεται** όταν ο admin αλλάζει
+ένα PUBLISHED πρόγραμμα. Frontend-only: **καμία** αλλαγή backend, **καμία** migration/backup, ο
+solver δεν εμπλέκεται (baseline 266/266 @ hard 0 ανέγγιχτο).
+
+SINGLE-SOURCE RENDER (extract, μηδενική διπλο-υλοποίηση): το μονολιθικό `StudentView` (~665 γρ.)
+σπάστηκε σε (α) **presentational** `StudentTimetableView` (όλο το JSX + ui-state: `yearFilter`/
+`mode`/`selectedCourses` + localStorage persistence + όλα τα derived `useMemo`) και (β) **data-hook**
+`useStudentTimetableData(client, basePath, {pollMs?})` παραμετροποιημένο με **axios client + base
+path**. Authed `/view` (`api`, `/timetables`) & public `/public` (`publicApi`, `/public/timetables`)
+γίνονται thin wrappers που μοιράζονται **μία πηγή render** — ακριβής **frontend-αντιστοιχία** του
+backend reuse όπου ο `PublicTimetableController` καλεί το package-private `assignmentToDto` του
+`TimetableController` (PV-1): μία λογική render, δύο επιφάνειες (authed/public). Shared types
+(`Timetable`/`Assignment`) σε `studentTimetableTypes.ts` → καθαρό DAG (hook→types, component→types,
+wrappers→hook+component, χωρίς cycle).
+
+ACCOUNT-LESS ΧΩΡΙΣ REDIRECT-LOOP: νέο `publicApi` = καθαρό `axios.create` **χωρίς κανένα
+interceptor**. Κρίσιμο: ο authed `api` έχει response interceptor `401 → localStorage.clear +
+window.location='/login'`· αν τον χρησιμοποιούσε η public σελίδα, ένα leftover/άκυρο token ή ένα
+401 θα πετούσε τον επισκέπτη στο login. Επιπλέον η route `/public` μπαίνει ως **sibling του
+`/login`, ΠΡΙΝ** το `/*` catch-all → **εκτός** `PrivateRoute` (κανένα redirect σε no-token) και
+**εκτός** `AppLayout`/`Navbar` (ο `Navbar` καλεί `useAuth()` — δεν τον θέλουμε public). Παραμένει
+μέσα στο `AuthProvider` (αβλαβές: χωρίς token `user=null`, ο redirect ζει μόνο στο `PrivateRoute`).
+
+POLLING AUTO-UPDATE (smooth, χωρίς SSE): `setInterval(20s)` ενεργό **μόνο** όταν δοθεί `pollMs`
+(άρα authed `/view` δεν κάνει poll, μόνο public). **Pause-on-hidden** (`if (!document.hidden)`) +
+**immediate refresh on visible** (`visibilitychange`) → δεν χτυπά το backend σε αόρατο tab, αλλά
+δείχνει φρέσκα δεδομένα μόλις επιστρέψει ο χρήστης. Το interval μένει **σταθερό** μέσω
+**latest-ref** (`selectedRef.current = selectedTtId`): τα `fetchList`/`refresh` callbacks διαβάζουν
+την τρέχουσα επιλογή χωρίς να εξαρτώνται από το `selectedTtId`, ώστε το `setInterval` να μην
+ξαναστήνεται σε κάθε αλλαγή προγράμματος. Το `refresh()` (poll path) **δεν** αγγίζει loading/clear
+→ καμία αναλαμπή στο auto-update· το default-selection ξανατρέχει **μόνο** αν χαθεί η τρέχουσα
+επιλογή από τη λίστα → το polling δεν μηδενίζει την επιλογή του χρήστη.
+
+PARITY (no-behavior-change του 2a, οριστικοποιημένο στο fix 986ae90): το selection-effect
+αποκαθιστά (α) **clear-on-switch** (`setAssignments([])` πριν το fetch) ώστε το authed `/view` να
+είναι πραγματικά πανομοιότυπο με πριν, και (β) **empty-state**: με μηδέν προγράμματα η επιλογή μένει
+`null` → καθαρίζει + σταματά το loading (όχι «Φόρτωση…» επ' άπειρον). Το clear ζει στο effect (όχι
+στο `refresh()`) ώστε ο διαχωρισμός «switch=clear / poll=smooth» να είναι ρητός.
+
+VERIFICATION: `tsc --noEmit` + `npm run build` καθαρά μετά από κάθε step. ESLint: τα 6 νέα αρχεία
+καθαρά· το `StudentTimetableView` φέρει **αυτούσια** τα 4 pre-existing lint errors του παλιού
+`StudentView` (επιβεβαιωμένο με stash-baseline) → **ESLint debt αμετάβλητο** (`any` count 1→1,
+relocated). Μία στοχευμένη `eslint-disable react-hooks/refs` στο intentional latest-ref pattern
+(load-bearing για το σταθερό interval), με σχόλιο αιτιολόγησης. Οι runtime έλεγχοι (visual parity
+`/view`, account-less `/public`, 20s auto-update) είναι browser-side, για επιβεβαίωση στο review.
+
+DELIVERY: 3 commits — `862402e` extract (StudentTimetableView + hook), `1b0dfbf` public view
+(publicApi + PublicStudentView + route), `986ae90` fix (clear-on-switch + empty-state). ΕΚΤΟΣ
+SCOPE (επόμενα μικρο-tasks): αφαίρεση ρόλου/seeding `STUDENT`· SSE (το polling αρκεί)· server-side
+απόκρυψη `visibleInTimetable=false` (γίνεται client-side, όπως ήδη).
