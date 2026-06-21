@@ -306,3 +306,63 @@ FORWARD / DEBT: το static `WEIGHTS` είναι ασφαλές **όσο τα so
 registries πρέπει να **de-static-οποιηθούν ΜΑΖΙ** (κοινό global-state debt). **BL-10:** dead-code
 — 2 constraint methods στο `TeacherAvailabilityConstraints` (διπλότυπα των wired κανόνων του
 `CeidConstraintProvider`, εντοπίστηκαν στο S4b-1) → cleanup σε B-φάση.
+
+## Φάση 7 (stretch) — Public StudentView (=A8)
+
+### [ab64f86] PV-1 — backend account-less public read endpoints (Φάση 1/2)
+
+ΣΤΟΧΟΣ: account-less, read-only δημόσια πρόσβαση **ΜΟΝΟ σε PUBLISHED** προγράμματα,
+ώστε ένας φοιτητής να βλέπει/εκτυπώνει το δημοσιευμένο πρόγραμμα **χωρίς login**. Backend
+μόνο (Φ1)· το frontend public route + auto-update (polling) έρχεται στη Φ2.
+
+ΣΧΕΔΙΑΣΗ — ΞΕΧΩΡΙΣΤΟ NAMESPACE, ΟΧΙ ΧΑΛΑΡΩΜΑ ΥΠΑΡΧΟΝΤΩΝ: νέος
+`PublicTimetableController` σε `/api/public/timetables`, **χωρίς να αγγιχτεί κανένα από τα
+authenticated endpoints** του `TimetableController`. Στο `SecurityConfig` μία μόνο γραμμή —
+`.requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()` — τοποθετημένη **ΑΚΡΙΒΩΣ
+ΠΡΙΝ** τον γενικό `GET /api/** → authenticated()` (η σειρά των matchers είναι σημαντική:
+ο πιο ειδικός πρώτος). **GET-only public**: κάθε non-GET στο `/api/public/**` πέφτει στο
+`anyRequest().authenticated()` → η δημόσια επιφάνεια είναι αυστηρά read-only by construction.
+Ο `JwtAuthFilter` ήδη περνά no-token requests χωρίς auth context (ίδιο μοτίβο με
+`/api/health`, `/api/auth/**`), οπότε permitAll = πραγματικά account-less.
+
+ΔΥΟ ΕΠΙΠΕΔΑ ΠΡΟΣΤΑΣΙΑΣ ΔΙΑΡΡΟΗΣ:
+- **(α) Minimal DTO, ΟΧΙ raw entity.** Νέο record `PublicTimetableDto`
+  (id/name/academicYear/timetableType/semesterType/publishedAt). Το raw `Timetable` entity
+  θα διέρρεε `createdBy`, `notes`, `solverScore/Conflicts/TimeSeconds`, `excludedDates`,
+  `status` — όλα κρύβονται. (Σημ.: τα authenticated endpoints εξακολουθούν να γυρνούν raw
+  entity· εδώ, στο public, σκόπιμα minimal projection.)
+- **(β) PUBLISHED gating με 404 (όχι 403) για μη-δημόσια.** Λίστα: `findByStatus(PUBLISHED,
+  …)` → **ΠΟΤΕ** μη-PUBLISHED. Assignments: `findById` + `status == PUBLISHED`, αλλιώς
+  **404** (και για DRAFT). 404 αντί 403 ώστε να μη διαρρέει **ούτε η ύπαρξη** μη-δημόσιου
+  προγράμματος (un-enumerable). **ΚΡΙΣΙΜΟ — υπάρχον κενό που έκλεισε:** το authenticated
+  `GET /api/timetables/{id}/assignments` ΔΕΝ ελέγχει status (role-filtering μόνο στη λίστα,
+  βλ. recon)· το public endpoint **επιβάλλει ρητά** το PUBLISHED check, αλλιώς το permitAll
+  θα είχε εκθέσει DRAFT αναθέσεις.
+
+ΕΠΑΝΑΧΡΗΣΗ ΧΩΡΙΣ ΑΝΤΙΓΡΑΦΗ: ο `PublicTimetableController` κάνει inject τον
+`TimetableController` (ίδιο `controller` package → νόμιμη κλήση του **package-private**
+`assignmentToDto`) ⇒ οι δημόσιες αναθέσεις render-άρονται με **την ίδια snapshot-first
+λογική** (invariant #1) με την authenticated προβολή· καμία απόκλιση render, μηδενική
+διπλο-υλοποίηση. Καμία κυκλική εξάρτηση (TimetableController δεν εξαρτάται από το public).
+
+ΜΗΔΕΝΙΚΟ ΣΧΗΜΑ / ΜΗΔΕΝΙΚΟ RISK ΣΤΟΝ SOLVER: το `status` enum (μαζί με `PUBLISHED`) υπήρχε
+ήδη → **καμία migration, κανένα backup**. Δεν αγγίχτηκαν solver/constraints/entities — το
+baseline (266/266 @ hard 0) δεν εμπλέκεται.
+
+VERIFICATION: νέο `PublicTimetableControllerTest` (`@SpringBootTest @AutoConfigureMockMvc`,
+**MockMvc χωρίς Authorization header** — πρώτο MockMvc test του repo, ασκεί το πραγματικό
+security filter chain). 3 σενάρια: (1) `GET /api/public/timetables` no-token → 200 & περιέχει
+το published id **όχι** το draft (membership check, robust σε dev-DB δεδομένα)· (2)
+draft `…/assignments` no-token → **404**· (3) published `…/assignments` no-token → 200 &
+μη-κενή λίστα. Marker-based seed/cleanup (`TEST_PUBVIEW_`), ΧΩΡΙΣ `@Transactional` (τα seeds
+commit ώστε να τα δει το request μέσα από το filter chain). Full suite **122/122** πράσινο,
+κανένα υπάρχον authed test δεν έσπασε.
+
+ΑΠΟΦΑΣΗ ΤΟΠΟΘΕΤΗΣΗΣ DTO: μπήκε στο `controller` package (όχι νέο `controller/dto`) — δεν
+υπάρχει dedicated dto package· τα DTOs ζουν στο controller layer (ως `Map<String,Object>`).
+Co-located με τον public controller, χωρίς one-file package.
+
+FORWARD (Φ2): public frontend route **έξω** από `PrivateRoute`/`AuthProvider` + ξεχωριστό
+axios χωρίς τον `401 → redirect /login` interceptor (αλλιώς redirect-loop σε no-token call)
++ polling auto-update. Ανοιχτό spec-ερώτημα: ΔΕΝ υπάρχει single «current» flag — πολλά
+PUBLISHED μπορούν να συνυπάρχουν (η λίστα ταξινομείται `publishedAt DESC`· ο client επιλέγει).
