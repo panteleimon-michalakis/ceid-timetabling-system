@@ -27,6 +27,8 @@ interface MoveAssignmentModalProps {
   onClose: () => void;
   onError: (msg: string) => void;
   onSuccess: (msg: string) => void;
+  // Non-blocking (Feature #2): advisory warnings από επιτυχημένο (200) move.
+  onWarnings?: (warnings: string[]) => void;
 }
 
 export default function MoveAssignmentModal({
@@ -37,6 +39,7 @@ export default function MoveAssignmentModal({
   onClose,
   onError,
   onSuccess,
+  onWarnings,
 }: MoveAssignmentModalProps) {
   const currentDay = assignment.timeSlot?.dayOfWeek || '';
   const currentHour = normalizeTime(assignment.timeSlot?.startTime);
@@ -75,12 +78,13 @@ export default function MoveAssignmentModal({
     setSaving(true);
 
     try {
-      await timetableService.moveAssignment(assignment.id, {
+      const result = await timetableService.moveAssignment(assignment.id, {
         timeSlotId: slotId,
         roomId: selectedRoomId,
       });
 
       onSuccess(`Το μάθημα ${assignment.course?.name} μετακινήθηκε.`);
+      onWarnings?.(result.warnings ?? []);
       onMoved();
       onClose();
     } catch (err: any) {

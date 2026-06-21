@@ -83,11 +83,8 @@ const assignmentTypeLabels: Record<string, string> = {
   LAB: 'Εργαστήριο',
 };
 
-const assignmentTypeLabelsGenitive: Record<string, string> = {
-  LECTURE: 'Θεωρίας',
-  TUTORIAL: 'Φροντιστηρίου',
-  LAB: 'Εργαστηρίου',
-};
+// (assignmentTypeLabelsGenitive αφαιρέθηκε — χρησιμοποιούνταν μόνο στους client
+//  pre-guards του submitManualAssignment, που έγιναν non-blocking στο Feature #2.)
 
 function getErrorMessage(error: any): string {
   return error?.response?.data?.error
@@ -202,6 +199,9 @@ export default function WeeklyTimetable() {
 
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Non-blocking advisory warnings (Feature #2): η τοποθέτηση γίνεται, αλλά το backend
+  // επιστρέφει προειδοποιήσεις (π.χ. room double-book) — εμφανίζονται ως amber notice.
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const [movingAssignment, setMovingAssignment] = useState<TimetableAssignment | null>(null);
   const [draggingAssignment, setDraggingAssignment] = useState<TimetableAssignment | null>(null);
@@ -454,8 +454,9 @@ function handleDragEnd() {
 async function handleDrop(day: string, hour: string) {
   if (!draggingAssignment || !selectedTimetableId) return;
 
-  // Block drop if instant hints say blocked
-  if (instantHintMap.get(assignmentKey(day, hour)) === 'blocked') return;
+  // Non-blocking (Feature #2): δεν μπλοκάρουμε πια σε 'blocked' hint — η τοποθέτηση
+  // προχωρά και το backend επιστρέφει advisory warnings. Τα hints/χρώματα μένουν ως
+  // ένδειξη «προσοχή».
 
   // Find the target time slot from loaded data
   const targetSlot = timeSlots.find(ts =>
@@ -481,12 +482,13 @@ async function handleDrop(day: string, hour: string) {
   }
 
   setSaving(true);
+  setWarnings([]);
   const moved = draggingAssignment;
   setDraggingAssignment(null);
   setDragOptions(null);
   setInstantHintMap(new Map());
   try {
-    await timetableService.moveAssignment(moved.id, {
+    const result = await timetableService.moveAssignment(moved.id, {
       timeSlotId: targetSlot.id,
       roomId: roomId,
     });
@@ -496,6 +498,7 @@ async function handleDrop(day: string, hour: string) {
       ? ` (${usedRoom!.code} — η ${moved.room!.code} ήταν κατειλημμένη)`
       : usedRoom ? ` (${usedRoom.code})` : '';
     setMessage(`${moved.course?.name} μετακινήθηκε → ${day} ${hour}${roomMsg}`);
+    setWarnings(result.warnings ?? []);
     await loadTimetableData(selectedTimetableId);
   } catch (err: any) {
     setError(getErrorMessage(err));
@@ -530,6 +533,7 @@ useEffect(() => {
     setPlacementOptions(null);
     setAutoScheduleResult(null);
     setMessage(null);
+    setWarnings([]);
     loadTimetableData(selectedTimetableId);
   }, [selectedTimetableId]);
 
@@ -664,21 +668,9 @@ function handleTimetableDeleted(id: number) {
       return;
     }
 
-    const requiredHours = getRequiredHoursForType(course, selectedAssignmentType);
-    const placedHours = getPlacedHoursForType(assignments, course.id, selectedAssignmentType);
-
-    if (requiredHours <= 0) {
-      setError(`Το μάθημα ${course.name} δεν έχει ώρες ${assignmentTypeLabelsGenitive[selectedAssignmentType]}.`);
-      return;
-    }
-
-    if (placedHours >= requiredHours) {
-      setError(
-        `Δεν μπορείς να προσθέσεις άλλη ώρα ${assignmentTypeLabelsGenitive[selectedAssignmentType]} `
-        + `για το μάθημα ${course.name}. Έχουν ήδη τοποθετηθεί ${placedHours}/${requiredHours} ώρες.`
-      );
-      return;
-    }
+    // Non-blocking (Feature #2): αφαιρέθηκαν τα client pre-guards #5 (καμία ώρα του τύπου)
+    // και #7 (υπέρβαση ωρών) — ο καθηγητής επιτρέπεται να τοποθετήσει· το backend τα
+    // επιστρέφει ως advisory warnings αντί να μπλοκάρει.
 
     const slotId = getSlotId(selectedDay, selectedHour);
 
@@ -690,9 +682,10 @@ function handleTimetableDeleted(id: number) {
     setSaving(true);
     setError(null);
     setMessage(null);
+    setWarnings([]);
 
     try {
-      await timetableService.addAssignment(selectedTimetableId, {
+      const result = await timetableService.addAssignment(selectedTimetableId, {
         courseId: selectedCourseId,
         roomId: selectedRoomId,
         timeSlotId: slotId,
@@ -703,6 +696,7 @@ function handleTimetableDeleted(id: number) {
 setPlacementOptions(null);
 setAutoScheduleResult(null);
 setMessage('Η ώρα προστέθηκε επιτυχώς.');
+setWarnings(result.warnings ?? []);
 await loadTimetableData(selectedTimetableId);
     } catch (err: any) {
       setError(getErrorMessage(err));
@@ -980,6 +974,22 @@ async function runSolver() {
 </button>
   </div>
 )}
+
+{warnings.length > 0 && (
+  <div style={toastWarningStyle}>
+    <strong>⚠ Προσοχή</strong>
+    <div style={{ marginTop: '0.35rem' }}>
+      {warnings.map((w, i) => <div key={i}>{w}</div>)}
+    </div>
+    <button
+      onClick={() => setWarnings([])}
+      style={toastCloseButtonStyle}
+      title="Κλείσιμο"
+    >
+      ×
+    </button>
+  </div>
+)}
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
         <div>
           <h1 style={{ fontSize: '1.6rem', marginBottom: '0.35rem' }}>Ωρολόγιο Πρόγραμμα</h1>
@@ -1150,7 +1160,7 @@ async function runSolver() {
   }}
   title={(() => {
     const hint = activeHintMap.get(assignmentKey(day.key, hour));
-    if (hint === 'blocked')   return 'Μη επιτρεπτή τοποθέτηση';
+    if (hint === 'blocked')   return 'Πιθανή σύγκρουση — επιτρέπεται η τοποθέτηση';
     if (hint === 'preferred') return '★ Προτιμώμενη ώρα καθηγητή';
     if (hint === 'allowed')   return 'Επιτρεπτή τοποθέτηση';
     return 'Κλικ για προσθήκη μαθήματος';
@@ -1483,6 +1493,7 @@ async function runSolver() {
           onClose={() => setMovingAssignment(null)}
           onError={(msg) => setError(msg)}
           onSuccess={(msg) => setMessage(msg)}
+          onWarnings={(w) => setWarnings(w)}
         />
       )}
     </div>
@@ -1953,6 +1964,13 @@ const toastSuccessStyle: CSSProperties = {
   ...toastBaseStyle,
   background: '#064e3b',
   border: '1px solid #10b981',
+};
+
+// Non-blocking advisory (Feature #2): amber — διακριτό από το κόκκινο error.
+const toastWarningStyle: CSSProperties = {
+  ...toastBaseStyle,
+  background: '#78350f',
+  border: '1px solid #f59e0b',
 };
 
 const toastCloseButtonStyle: CSSProperties = {

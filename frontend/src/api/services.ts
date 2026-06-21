@@ -64,6 +64,15 @@ export interface AutoScheduleSummary {
   log: string[];
 }
 
+/**
+ * Response των add/move μετά το non-blocking backend (Feature #2): το assignment DTO
+ * + advisory `warnings` (0-ή-1 εγγραφή τώρα· το Feature #3 θα το γεμίσει με τον πλήρη
+ * κατηγοριοποιημένο πίνακα). Κενό array = καθαρή τοποθέτηση.
+ */
+export interface AssignmentMutationResult extends TimetableAssignment {
+  warnings?: string[];
+}
+
 export const timetableService = {
   getAll: () => api.get<Timetable[]>('/timetables'),
   getById: (id: number) => api.get<Timetable>(`/timetables/${id}`),
@@ -96,7 +105,8 @@ export const timetableService = {
     assignmentType: string;
     examDurationMinutes?: number;
     isLocked?: boolean;
-  }) => api.post<TimetableAssignment>(`/timetables/${id}/assignments`, data),
+  }): Promise<AssignmentMutationResult> =>
+    api.post<AssignmentMutationResult>(`/timetables/${id}/assignments`, data).then(r => r.data),
 
   removeAssignment: (assignmentId: number) =>
     api.delete(`/timetables/assignments/${assignmentId}`),
@@ -110,8 +120,8 @@ export const timetableService = {
     api.post<{ id: number; dayOfWeek: string; startTime: string; endTime: string; slotType: string; specificDate: string }>(
       `/timetables/exam-slots/find-or-create`, { date, startHour }),
 
-  moveAssignment: (assignmentId: number, data: { roomId?: number; timeSlotId?: number }) =>
-    api.put<TimetableAssignment>(`/timetables/assignments/${assignmentId}/move`, data),
+  moveAssignment: (assignmentId: number, data: { roomId?: number; timeSlotId?: number }): Promise<AssignmentMutationResult> =>
+    api.put<AssignmentMutationResult>(`/timetables/assignments/${assignmentId}/move`, data).then(r => r.data),
 
   getProgress: (id: number) =>
     api.get<TimetableProgress>(`/timetables/${id}/progress`),
