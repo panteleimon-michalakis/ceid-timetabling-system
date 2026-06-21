@@ -420,3 +420,55 @@ DELIVERY: 3 commits — `862402e` extract (StudentTimetableView + hook), `1b0dfb
 (publicApi + PublicStudentView + route), `986ae90` fix (clear-on-switch + empty-state). ΕΚΤΟΣ
 SCOPE (επόμενα μικρο-tasks): αφαίρεση ρόλου/seeding `STUDENT`· SSE (το polling αρκεί)· server-side
 απόκρυψη `visibleInTimetable=false` (γίνεται client-side, όπως ήδη).
+
+## Feature #2 — Non-blocking manual editing
+
+### [f98416e] NB-1 — backend: advisory placement (3 structural HARD vs υπόλοιπα non-blocking, βήμα 1/2)
+
+ΣΤΟΧΟΣ: ο καθηγητής/admin τοποθετεί/μετακινεί χειροκίνητα **πάντα** (ποτέ reject) για
+παραβιάσεις **scheduling-constraints** και βλέπει advisory ανατροφοδότηση, αντί να μπλοκάρεται.
+Backend-only (βήμα 1/2)· το frontend (αφαίρεση client-side pre-blocks + εμφάνιση warnings ως
+notice) έρχεται στο βήμα 2/2.
+
+ΑΠΟΦΑΣΗ — 3 STRUCTURAL HARD vs ΥΠΟΛΟΙΠΑ ADVISORY: από τους 16 ελέγχους του
+`validateAssignment`, **μένουν HARD blocks (4xx)** μόνο οι **3 structural/data-integrity** που
+αλλιώς παράγουν corrupt/un-renderable δεδομένα: **#1** ελλιπή δεδομένα (null
+timetable/course/room/timeSlot/type), **#3** type↔timetable συμβατότητα (EXAM type μόνο σε
+εξεταστικό πρόγραμμα & αντίστροφα), **#4** exam-slot structural rules (slotType EXAM, specificDate
+set, εντός start/end). Όλοι οι υπόλοιποι (**#2, #5–#16**: room double-book, teacher conflict,
+year-room κανόνες CEID, όρια ωρών, ≥6 ώρες θεωρίας/ημέρα, lunch break κ.λπ.) → **advisory**: η
+τοποθέτηση γίνεται και επιστρέφεται non-blocking `warnings` μέσα στο **200** response.
+
+ΥΛΟΠΟΙΗΣΗ — COPY-NOT-MOVE (συνειδητή μικρο-διπλασίαση): νέα `private validateStructural(...)`
+που τρέχει ΜΟΝΟ τα #1/#3/#4 (τα 3 check blocks **VERBATIM copies** — ίδια conditionals + ίδια
+ελληνικά `badRequest` μηνύματα). Το `validateAssignment` **ΜΕΝΕΙ ΑΝΕΠΑΦΟ** (κρατά και τους 16):
+το χρησιμοποιεί **advisory** το `getPlacementOptions` (allowed/blocked overlay), οπότε αλλαγή του
+θα έσπαγε εκείνο το μονοπάτι. DRY consolidation σημειωμένη ως deferred (σχόλιο στον κώδικα).
+
+ADVISORY BRIDGE: στους δύο write-paths, μετά το HARD `validateStructural` gate, καλείται το
+`validateAssignment` (πρώτη παραβίαση, early-return) ΠΡΙΝ το save και το string εξάγεται με τον
+υπάρχοντα `getValidationErrorText(ResponseEntity)` → `warnings` (`List<String>`). Στο `moveAssignment`
+το advisory τρέχει με `ignoredAssignmentId = self` (να μη συγκρούεται με την τρέχουσα θέση του),
+υπολογισμένο ΠΡΙΝ το mutate/save. Το `warnings` μπαίνει στο φρέσκο mutable `LinkedHashMap` του
+`assignmentToDto` (key `warnings`). **Contract:** 0-ή-1 εγγραφή σε αυτό το βήμα — array για
+forward-compat· το Feature #3 θα το γεμίσει με πλήρη κατηγοριοποιημένη λίστα (ScoreAnalysis).
+Μικρο-σημείωση: το request param των δύο handlers λέγεται ήδη `body` → το response map ονομάστηκε
+`responseBody` (αποφυγή shadowing — η literal πρόταση του spec θα έκανε collision).
+
+ΑΝΕΠΑΦΑ paths: `validateAssignment` (ως έχει), `getPlacementOptions`, `autoSchedule` (έχει δικό του
+non-blocking μηχανισμό `getBlockingReasonsInMemoryFast` → best-effort skip, ποτέ reject), `solve`,
+`removeAssignment`· persistence/snapshot stamping αμετάβλητα. **Καμία migration / schema change /
+backup** (καθαρά λογική controller). Κανένας solver/constraint κώδικας → baseline 266/266 @ hard 0
+διατηρείται by construction (οι ConstraintVerifier tests 29+23 πράσινοι).
+
+VERIFICATION: νέο `NonBlockingPlacementTest` (`@SpringBootTest` + MockMvc, marker `TEST_NB_`,
+ΧΩΡΙΣ `@Transactional`, JWT ADMIN μέσω `POST /api/auth/login`), 4 σενάρια: (1) advisory add
+(room double-book) → **200** + μη-κενά warnings + persisted· (2) structural add (EXAM σε SEMESTER,
+#3) → **400** + NOT persisted· (3) advisory move (σε κατειλημμένο slot) → **200** + warnings + νέα
+θέση αποθηκευμένη· (4) clean add → **200** + κενά warnings + persisted. Full suite **121/121**
+(117 baseline + 4), κανένα υπάρχον test δεν έσπασε.
+
+FORWARD (βήμα 2/2 — frontend): αφαίρεση client-side pre-blocks (`WeeklyTimetable.handleDrop` silent
+abort γρ. 458, `submitManualAssignment` hour-guards γρ. 670–681)· εμφάνιση `warnings` ως
+non-blocking notice αντί error banner· relabel drag hint «Μη επιτρεπτή τοποθέτηση» → advisory
+wording (διατήρηση χρωμάτων). DEBT: `validateStructural` ⊂ `validateAssignment` DRY consolidation.
