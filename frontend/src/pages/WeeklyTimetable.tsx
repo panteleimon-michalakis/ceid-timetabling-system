@@ -1319,9 +1319,23 @@ async function runSolver() {
                 </section>
               )}
 
+              {validation && validation.errors.length > 0 && (
+                <section style={panelStyle}>
+                  <h2 style={panelTitleStyle}>Πρώτα σφάλματα</h2>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: '260px', overflowY: 'auto' }}>
+                    {validation.errors.slice(0, 8).map((error, index) => (
+                      <div key={`${error.referenceId}-${error.code}-${index}`} style={{ color: '#f87171', fontSize: '0.82rem', lineHeight: 1.35 }}>
+                        {error.message}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {validation && validation.warnings.length > 0 && (
                 <section style={panelStyle}>
-                  <h2 style={panelTitleStyle}>Πρώτα warnings</h2>
+                  <h2 style={panelTitleStyle}>Πρώτα προειδοποιήσεις</h2>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: '260px', overflowY: 'auto' }}>
                     {validation.warnings.slice(0, 8).map((warning, index) => (
