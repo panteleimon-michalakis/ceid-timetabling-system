@@ -15,6 +15,7 @@ import type {
 import TimetableSelector from '../components/TimetableSelector';
 import MoveAssignmentModal from '../components/MoveAssignmentModal';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
+import ValidationIssuesModal from '../components/ValidationIssuesModal';
 
 const DAYS = [
   { key: 'MONDAY', label: 'Δευτέρα' },
@@ -213,6 +214,7 @@ export default function WeeklyTimetable() {
 
   const [movingAssignment, setMovingAssignment] = useState<TimetableAssignment | null>(null);
   const [detailsAssignment, setDetailsAssignment] = useState<TimetableAssignment | null>(null);
+  const [issuesModal, setIssuesModal] = useState<'ERROR' | 'WARNING' | null>(null);
   const [draggingAssignment, setDraggingAssignment] = useState<TimetableAssignment | null>(null);
   const [dragOptions, setDragOptions] = useState<PlacementOptionsResponse | null>(null);
   const [instantHintMap, setInstantHintMap] = useState<Map<string, 'allowed' | 'blocked' | 'preferred'>>(new Map());
@@ -640,7 +642,10 @@ function handleTimetableDeleted(id: number) {
     setSelectedDay(day);
     setSelectedHour(hour);
     setSelectedRoomId('');
-    setCourseSearch(selectedCourse?.name ?? '');
+    setCourseSearch('');
+    setSelectedCourseId('');
+    setPlacementOptions(null);
+    setSelectedAssignmentType('LECTURE');
     setError(null);
     setMessage(null);
     setShowAddModal(true);
@@ -1116,8 +1121,8 @@ async function runSolver() {
           <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
             <StatCard title="Τοποθετημένες ώρες" value={assignments.length} />
             <StatCard title="Πρόοδος" value={`${progress?.percentage ?? 0}%`} />
-            <StatCard title="Errors" value={validation?.errorCount ?? 0} danger={(validation?.errorCount ?? 0) > 0} />
-            <StatCard title="Warnings" value={validation?.warningCount ?? 0} warning={(validation?.warningCount ?? 0) > 0} />
+            <StatCard title="Errors" value={validation?.errorCount ?? 0} danger={(validation?.errorCount ?? 0) > 0} onClick={() => setIssuesModal('ERROR')} />
+            <StatCard title="Warnings" value={validation?.warningCount ?? 0} warning={(validation?.warningCount ?? 0) > 0} onClick={() => setIssuesModal('WARNING')} />
           </div>
 
           <div className="wt-main-grid" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem', alignItems: 'start' }}>
@@ -1512,6 +1517,16 @@ async function runSolver() {
         onDelete={() => { if (detailsAssignment) removeAssignment(detailsAssignment.id); setDetailsAssignment(null); }}
         disabled={saving}
       />
+
+      <ValidationIssuesModal
+        severity={issuesModal}
+        issues={
+          issuesModal === 'ERROR'   ? (validation?.errors   ?? [])
+        : issuesModal === 'WARNING' ? (validation?.warnings ?? [])
+        : []
+        }
+        onClose={() => setIssuesModal(null)}
+      />
     </div>
   );
 }
@@ -1588,16 +1603,29 @@ function StatCard({
   value,
   danger,
   warning,
+  onClick,
 }: {
   title: string;
   value: number | string;
   danger?: boolean;
   warning?: boolean;
+  onClick?: () => void;
 }) {
   const color = danger ? '#ef4444' : warning ? '#f59e0b' : '#3b82f6';
 
   return (
-    <div style={{ padding: '1rem', background: '#1e293b', borderRadius: '12px', borderLeft: `4px solid ${color}` }}>
+    <div
+      onClick={onClick}
+      title={onClick ? 'Κλικ για λεπτομέρειες' : undefined}
+      style={{
+        padding: '1rem',
+        background: '#1e293b',
+        borderRadius: '12px',
+        borderLeft: `4px solid ${color}`,
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'filter 0.15s',
+      }}
+    >
       <div style={{ fontSize: '1.45rem', fontWeight: 800, color }}>{value}</div>
       <div style={{ color: '#94a3b8', fontSize: '0.9rem' }}>{title}</div>
     </div>
