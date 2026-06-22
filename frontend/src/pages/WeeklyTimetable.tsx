@@ -14,6 +14,7 @@ import type {
 } from '../types';
 import TimetableSelector from '../components/TimetableSelector';
 import MoveAssignmentModal from '../components/MoveAssignmentModal';
+import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 
 const DAYS = [
   { key: 'MONDAY', label: 'Δευτέρα' },
@@ -81,6 +82,13 @@ const assignmentTypeLabels: Record<string, string> = {
   LECTURE: 'Θεωρία',
   TUTORIAL: 'Φροντιστήριο',
   LAB: 'Εργαστήριο',
+};
+
+// Χρωματική λωρίδα κάρτας ανά τύπο ώρας (ίδια χρώματα με το print legend, ~γρ. 915).
+const assignmentTypeColors: Record<string, string> = {
+  LECTURE: '#2563eb',
+  TUTORIAL: '#16a34a',
+  LAB: '#d97706',
 };
 
 // (assignmentTypeLabelsGenitive αφαιρέθηκε — χρησιμοποιούνταν μόνο στους client
@@ -204,6 +212,7 @@ export default function WeeklyTimetable() {
   const [warnings, setWarnings] = useState<string[]>([]);
 
   const [movingAssignment, setMovingAssignment] = useState<TimetableAssignment | null>(null);
+  const [detailsAssignment, setDetailsAssignment] = useState<TimetableAssignment | null>(null);
   const [draggingAssignment, setDraggingAssignment] = useState<TimetableAssignment | null>(null);
   const [dragOptions, setDragOptions] = useState<PlacementOptionsResponse | null>(null);
   const [instantHintMap, setInstantHintMap] = useState<Map<string, 'allowed' | 'blocked' | 'preferred'>>(new Map());
@@ -1111,10 +1120,10 @@ async function runSolver() {
             <StatCard title="Warnings" value={validation?.warningCount ?? 0} warning={(validation?.warningCount ?? 0) > 0} />
           </div>
 
-          <div className="wt-main-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
+          <div className="wt-main-grid" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem', alignItems: 'start' }}>
             <section style={{ background: '#111827', border: '1px solid #1e293b', borderRadius: '12px', overflow: 'hidden' }}>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', minWidth: '950px', borderCollapse: 'collapse' }}>
+                <table style={{ width: '100%', minWidth: '720px', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
                       <th style={headerCellStyle}>Ώρα</th>
@@ -1127,7 +1136,7 @@ async function runSolver() {
                   <tbody>
                     {HOURS.map((hour) => (
                       <tr key={hour}>
-                        <td style={{ ...cellStyle, width: '90px', color: '#cbd5e1', fontWeight: 700 }}>
+                        <td style={{ ...cellStyle, width: '64px', color: '#cbd5e1', fontWeight: 700 }}>
                           {hour}<br />
                           <span style={{ fontWeight: 400, color: '#64748b' }}>{hourEnd(hour)}</span>
                         </td>
@@ -1172,13 +1181,14 @@ async function runSolver() {
                               {slotAssignments.length === 0 ? (
                                 <span style={{ color: '#334155', fontSize: '0.8rem' }}>+ Προσθήκη</span>
                               ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                                   {slotAssignments.map((assignment) => (
                                     <AssignmentCard
   					key={assignment.id}
   					assignment={assignment}
   					onDelete={() => removeAssignment(assignment.id)}
   					onMove={() => setMovingAssignment(assignment)}
+  					onShowDetails={() => setDetailsAssignment(assignment)}
   					onDragStart={() => handleDragStart(assignment)}
   					onDragEnd={handleDragEnd}
   					disabled={saving}
@@ -1196,7 +1206,7 @@ async function runSolver() {
               </div>
             </section>
 
-            <aside style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <aside style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-start' }}>
               <section style={panelStyle}>
                 <h2 style={panelTitleStyle}>Προσθήκη ώρας με προτάσεις</h2>
 
@@ -1496,6 +1506,11 @@ async function runSolver() {
           onWarnings={(w) => setWarnings(w)}
         />
       )}
+
+      <AssignmentDetailsModal
+        assignment={detailsAssignment}
+        onClose={() => setDetailsAssignment(null)}
+      />
     </div>
   );
 }
@@ -1592,6 +1607,7 @@ function AssignmentCard({
   assignment,
   onDelete,
   onMove,
+  onShowDetails,
   onDragStart,
   onDragEnd,
   disabled,
@@ -1599,61 +1615,59 @@ function AssignmentCard({
   assignment: TimetableAssignment;
   onDelete: () => void;
   onMove: () => void;
+  onShowDetails: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
   disabled: boolean;
 }) {
+  const typeColor = assignmentTypeColors[assignment.assignmentType] ?? '#3b82f6';
+
   return (
-        <div
-      onClick={(event) => event.stopPropagation()}
+    <div
+      onClick={(event) => { event.stopPropagation(); onShowDetails(); }}
       draggable={true}
       onDragStart={(e) => { e.stopPropagation(); onDragStart(); }}
       onDragEnd={(e) => { e.stopPropagation(); onDragEnd(); }}
-      style={{ background: '#1d4ed8', borderRadius: '8px', padding: '0.55rem', color: '#fff', cursor: 'grab' }}
+      title="Κλικ για λεπτομέρειες"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '0.25rem',
+        background: '#1e293b',
+        borderLeft: `3px solid ${typeColor}`,
+        borderRadius: '5px',
+        padding: '0.2rem 0.35rem',
+        color: '#fff',
+        cursor: 'grab',
+      }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
-        <div style={{ fontWeight: 800, fontSize: '0.78rem' }}>
-          {assignment.course?.code}
-          {assignment.course?.visibleInTimetable === false && (
-            <span title="Σε συνεννόηση — δεν εμφανίζεται στο δημόσιο πρόγραμμα"
-                  style={{ marginLeft: 5, fontSize: '0.7rem' }}>🤝</span>
-          )}
-        </div>
+      <span style={{ display: 'flex', alignItems: 'center', fontWeight: 700, fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {assignment.course?.code}
+        {assignment.course?.visibleInTimetable === false && (
+          <span title="Σε συνεννόηση — δεν εμφανίζεται στο δημόσιο πρόγραμμα"
+                style={{ marginLeft: 4, fontSize: '0.65rem' }}>🤝</span>
+        )}
+      </span>
 
-       <div style={{ display: 'flex', gap: '0.2rem' }}>
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              onMove();
-            }}
-            disabled={disabled}
-            title="Μετακίνηση"
-            style={{ border: 'none', borderRadius: '5px', background: 'rgba(15,23,42,0.55)', color: '#93c5fd', cursor: 'pointer', padding: '0.1rem 0.35rem', fontSize: '0.7rem' }}
-          >
-            ↔
-          </button>
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete();
-            }}
-            disabled={disabled}
-            title="Διαγραφή ανάθεσης"
-            style={{ border: 'none', borderRadius: '5px', background: 'rgba(15,23,42,0.55)', color: '#fff', cursor: 'pointer', padding: '0.1rem 0.35rem' }}
-          >
-            ×
-          </button>
-        </div>
-      </div>
-
-      <div style={{ fontSize: '0.75rem', lineHeight: 1.25, marginTop: '0.25rem' }}>
-        {assignment.course?.name}
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dbeafe', fontSize: '0.72rem', marginTop: '0.35rem' }}>
-        <span>{assignment.room?.code}</span>
-        <span>{assignmentTypeLabels[assignment.assignmentType] ?? assignment.assignmentType}</span>
-      </div>
+      <span style={{ display: 'flex', gap: '0.15rem', flexShrink: 0 }}>
+        <button
+          onClick={(event) => { event.stopPropagation(); onMove(); }}
+          disabled={disabled}
+          title="Μετακίνηση"
+          style={{ border: 'none', borderRadius: '4px', background: 'rgba(15,23,42,0.55)', color: '#93c5fd', cursor: 'pointer', padding: '0 0.25rem', fontSize: '0.65rem', lineHeight: 1.4 }}
+        >
+          ↔
+        </button>
+        <button
+          onClick={(event) => { event.stopPropagation(); onDelete(); }}
+          disabled={disabled}
+          title="Διαγραφή ανάθεσης"
+          style={{ border: 'none', borderRadius: '4px', background: 'rgba(15,23,42,0.55)', color: '#fff', cursor: 'pointer', padding: '0 0.25rem', fontSize: '0.65rem', lineHeight: 1.4 }}
+        >
+          ×
+        </button>
+      </span>
     </div>
   );
 }
@@ -1842,7 +1856,7 @@ const warningCount = validation?.warningCount ?? 0;
 }
 
 const headerCellStyle: CSSProperties = {
-  padding: '0.75rem',
+  padding: '0.4rem',
   background: '#1e293b',
   color: '#e2e8f0',
   borderBottom: '1px solid #334155',
@@ -1850,11 +1864,11 @@ const headerCellStyle: CSSProperties = {
 };
 
 const cellStyle: CSSProperties = {
-  padding: '0.65rem',
+  padding: '0.3rem',
   verticalAlign: 'top',
   borderBottom: '1px solid #1e293b',
   borderRight: '1px solid #1e293b',
-  minHeight: '80px',
+  minHeight: '34px',
 };
 
 const panelStyle: CSSProperties = {
@@ -1862,6 +1876,7 @@ const panelStyle: CSSProperties = {
   border: '1px solid #1e293b',
   borderRadius: '12px',
   padding: '1rem',
+  flex: '1 1 320px',
 };
 
 const panelTitleStyle: CSSProperties = {
