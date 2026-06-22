@@ -31,9 +31,12 @@ function normalizeTime(value?: string | null): string {
 interface AssignmentDetailsModalProps {
   assignment: TimetableAssignment | null;
   onClose: () => void;
+  onMove?: () => void;
+  onDelete?: () => void;
+  disabled?: boolean;
 }
 
-export default function AssignmentDetailsModal({ assignment, onClose }: AssignmentDetailsModalProps) {
+export default function AssignmentDetailsModal({ assignment, onClose, onMove, onDelete, disabled }: AssignmentDetailsModalProps) {
   if (!assignment) return null;
 
   const { course, room, timeSlot } = assignment;
@@ -91,6 +94,21 @@ export default function AssignmentDetailsModal({ assignment, onClose }: Assignme
             </div>
           ))}
         </div>
+
+        {(onMove || onDelete) && (
+          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
+            {onMove && (
+              <button onClick={onMove} disabled={disabled} title="Μετακίνηση" style={moveBtnStyle}>
+                ↔ Μετακίνηση
+              </button>
+            )}
+            {onDelete && (
+              <button onClick={onDelete} disabled={disabled} title="Διαγραφή ανάθεσης" style={deleteBtnStyle}>
+                × Διαγραφή
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -112,4 +130,14 @@ const modalStyle: CSSProperties = {
 const closeBtnStyle: CSSProperties = {
   border: 'none', borderRadius: '6px', background: '#334155', color: '#fff',
   cursor: 'pointer', padding: '0.2rem 0.6rem', fontSize: '1.1rem', lineHeight: 1,
+};
+
+const moveBtnStyle: CSSProperties = {
+  padding: '0.55rem 1rem', border: 'none', borderRadius: '8px',
+  background: '#2563eb', color: '#fff', fontWeight: 700, cursor: 'pointer',
+};
+
+const deleteBtnStyle: CSSProperties = {
+  padding: '0.55rem 1rem', border: '1px solid #7f1d1d', borderRadius: '8px',
+  background: 'rgba(127,29,29,0.15)', color: '#f87171', fontWeight: 700, cursor: 'pointer',
 };

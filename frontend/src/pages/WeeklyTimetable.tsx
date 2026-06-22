@@ -1181,13 +1181,11 @@ async function runSolver() {
                               {slotAssignments.length === 0 ? (
                                 <span style={{ color: '#334155', fontSize: '0.8rem' }}>+ Προσθήκη</span>
                               ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'flex-start' }}>
                                   {slotAssignments.map((assignment) => (
                                     <AssignmentCard
   					key={assignment.id}
   					assignment={assignment}
-  					onDelete={() => removeAssignment(assignment.id)}
-  					onMove={() => setMovingAssignment(assignment)}
   					onShowDetails={() => setDetailsAssignment(assignment)}
   					onDragStart={() => handleDragStart(assignment)}
   					onDragEnd={handleDragEnd}
@@ -1510,6 +1508,9 @@ async function runSolver() {
       <AssignmentDetailsModal
         assignment={detailsAssignment}
         onClose={() => setDetailsAssignment(null)}
+        onMove={() => { if (detailsAssignment) setMovingAssignment(detailsAssignment); setDetailsAssignment(null); }}
+        onDelete={() => { if (detailsAssignment) removeAssignment(detailsAssignment.id); setDetailsAssignment(null); }}
+        disabled={saving}
       />
     </div>
   );
@@ -1605,22 +1606,19 @@ function StatCard({
 
 function AssignmentCard({
   assignment,
-  onDelete,
-  onMove,
   onShowDetails,
   onDragStart,
   onDragEnd,
   disabled,
 }: {
   assignment: TimetableAssignment;
-  onDelete: () => void;
-  onMove: () => void;
   onShowDetails: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
   disabled: boolean;
 }) {
   const typeColor = assignmentTypeColors[assignment.assignmentType] ?? '#3b82f6';
+  const shortCode = (assignment.course?.code ?? '').replace(/^CEID_/, '');
 
   return (
     <div
@@ -1628,46 +1626,30 @@ function AssignmentCard({
       draggable={true}
       onDragStart={(e) => { e.stopPropagation(); onDragStart(); }}
       onDragEnd={(e) => { e.stopPropagation(); onDragEnd(); }}
-      title="Κλικ για λεπτομέρειες"
+      title={assignment.course?.code}
       style={{
-        display: 'flex',
+        display: 'inline-flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '0.25rem',
+        gap: '0.2rem',
         background: '#1e293b',
         borderLeft: `3px solid ${typeColor}`,
-        borderRadius: '5px',
-        padding: '0.2rem 0.35rem',
-        color: '#fff',
+        borderRadius: '4px',
+        padding: '0.1rem 0.3rem',
+        color: '#e2e8f0',
+        fontSize: '0.68rem',
+        fontWeight: 600,
         cursor: 'grab',
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
+        maxWidth: '100%',
+        opacity: disabled ? 0.6 : 1,
       }}
     >
-      <span style={{ display: 'flex', alignItems: 'center', fontWeight: 700, fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {assignment.course?.code}
-        {assignment.course?.visibleInTimetable === false && (
-          <span title="Σε συνεννόηση — δεν εμφανίζεται στο δημόσιο πρόγραμμα"
-                style={{ marginLeft: 4, fontSize: '0.65rem' }}>🤝</span>
-        )}
-      </span>
-
-      <span style={{ display: 'flex', gap: '0.15rem', flexShrink: 0 }}>
-        <button
-          onClick={(event) => { event.stopPropagation(); onMove(); }}
-          disabled={disabled}
-          title="Μετακίνηση"
-          style={{ border: 'none', borderRadius: '4px', background: 'rgba(15,23,42,0.55)', color: '#93c5fd', cursor: 'pointer', padding: '0 0.25rem', fontSize: '0.65rem', lineHeight: 1.4 }}
-        >
-          ↔
-        </button>
-        <button
-          onClick={(event) => { event.stopPropagation(); onDelete(); }}
-          disabled={disabled}
-          title="Διαγραφή ανάθεσης"
-          style={{ border: 'none', borderRadius: '4px', background: 'rgba(15,23,42,0.55)', color: '#fff', cursor: 'pointer', padding: '0 0.25rem', fontSize: '0.65rem', lineHeight: 1.4 }}
-        >
-          ×
-        </button>
-      </span>
+      {shortCode}
+      {assignment.course?.visibleInTimetable === false && (
+        <span title="Σε συνεννόηση — δεν εμφανίζεται στο δημόσιο πρόγραμμα"
+              style={{ fontSize: '0.62rem' }}>🤝</span>
+      )}
     </div>
   );
 }
@@ -1864,11 +1846,11 @@ const headerCellStyle: CSSProperties = {
 };
 
 const cellStyle: CSSProperties = {
-  padding: '0.3rem',
+  padding: '0.25rem',
   verticalAlign: 'top',
   borderBottom: '1px solid #1e293b',
   borderRight: '1px solid #1e293b',
-  minHeight: '34px',
+  minHeight: '28px',
 };
 
 const panelStyle: CSSProperties = {
