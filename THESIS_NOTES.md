@@ -472,3 +472,42 @@ FORWARD (βήμα 2/2 — frontend): αφαίρεση client-side pre-blocks (`W
 abort γρ. 458, `submitManualAssignment` hour-guards γρ. 670–681)· εμφάνιση `warnings` ως
 non-blocking notice αντί error banner· relabel drag hint «Μη επιτρεπτή τοποθέτηση» → advisory
 wording (διατήρηση χρωμάτων). DEBT: `validateStructural` ⊂ `validateAssignment` DRY consolidation.
+
+## Data integrity — study_year invariant
+
+### [7009ef3] DF-1 — διόρθωση CEID_22Y101 study_year (seeder + Flyway V5)
+
+ΑΣΥΝΕΠΕΙΑ: το μάθημα **CEID_22Y101 «Διακριτά Μαθηματικά»** είχε `semester=3` (σωστό, 3ο
+εξάμηνο) αλλά `study_year=1` (λάθος· σωστό = **2**, αφού έτος = `ceil(εξάμηνο/2)`). **Μοναδικό**
+ασυνεπές μάθημα στη βάση (`study_year <> CEIL(semester/2.0)` → 1 row, semester 3). Διπλή πηγή:
+(α) ο `config/DataSeeder.java:126` τροφοδοτούσε `sem=1, year=1`, και (β) η live dev βάση είχε
+`semester=3` (διορθωμένο post-seed μέσω CRUD) αλλά το `study_year` έμεινε στο seeded 1 — ποτέ δεν
+ανέβηκε σε 2 (ο upsert-skip `req(...)` δεν ξαναγράφει υπάρχουσα εγγραφή).
+
+ΣΥΝΕΠΕΙΑ (γιατί έγινε ορατό): ο advisory έλεγχος year-room του `validateAssignment`
+(`TimetableController` ~γρ.1790, `course.getStudyYear() == 1 && !"Γ".equals(room.getCode())`) κλειδώνει
+στο `study_year`, ΟΧΙ στο `semester` → θεωρούσε το 3ου-εξαμήνου μάθημα 1ου έτους και έβγαζε λάθος
+warning «μαθήματα 1ου έτους μόνο στο Αμφιθέατρο Γ».
+
+ΔΙΟΡΘΩΣΗ — δύο εστίες (καθαρά data, καμία αλλαγή λογικής/βαρών): (α) **seed source**
+`DataSeeder.java:126` `sem 1→3, year 1→2` (τα υπόλοιπα lec=3/tut=2/lab=0/ects=7/«ΕΘ»/«FALL»/244
+αμετάβλητα· «FALL» σωστό για περιττό εξάμηνο), ώστε καθαρό re-seed να μην ξαναγεννά το λάθος· (β)
+**Flyway `V5__fix_study_year_invariant.sql`** — idempotent, γενικό: `UPDATE courses SET study_year =
+CEIL(semester/2.0) WHERE study_year <> CEIL(semester/2.0)`. Επιβάλλει τον αναλλοίωτο `study_year =
+ceil(semester/2)` σε migration time· σε συνεπή βάση επηρεάζει 0 γραμμές (idempotent), οπότε διορθώνει
+και το συγκεκριμένο row και οποιαδήποτε μελλοντική ασυνέπεια.
+
+SOLVER-RELEVANCE & VERIFY: το `study_year` δεν είναι μόνο display — τροφοδοτεί **year-constraints**
+του solver (required-same-year conflict, sameYearSameDay spread, year-room κανόνες), γι' αυτό η
+αλλαγή θεωρείται HIGH-RISK και απαιτεί re-verify του baseline. Full suite **121/121** πράσινο (οι
+ConstraintVerifier tests χρησιμοποιούν synthetic data → ανεπηρέαστοι· το context boot εφάρμοσε το V5
+στη live βάση — Flyway `Current version: 5`, success=t). Post-fix SQL: CEID_22Y101 → `semester=3,
+study_year=2`· inconsistent = **0**. Backup πριν την αλλαγή: `backups/ceid_timetable_2026-06-22_0359.dump`.
+Runtime re-verify (από τον Pantelis, browser): (1) το λάθος warning «1ου έτους» δεν εμφανίζεται πλέον
+στο CEID_22Y101· (2) auto-schedule ολόκληρου του εβδομαδιαίου dataset → **266/266 @ hardScore 0**
+(το μάθημα ξαναομαδοποιείται ως 2ο έτος, πρέπει να μένει feasible).
+
+FUTURE WORK: το `study_year` θα ήταν ασφαλέστερο ως **derived invariant** του `semester`
+(computed `ceil(semester/2)` αντί stored field) — θα απέκλειε εξ ορισμού αυτή την κατηγορία bug
+(stored-but-stale). Σήμερα είναι αποθηκευμένο πεδίο σε πολλά σημεία (entity, seeder, solver POJOs,
+snapshot), οπότε η μετατροπή είναι ξεχωριστό refactor — σημειωμένο, εκτός scope εδώ.
