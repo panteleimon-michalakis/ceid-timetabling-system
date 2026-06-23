@@ -7,6 +7,7 @@ import type {
   TimetableAssignment, TimetableProgress, TimetableValidationReport,
 } from '../types';
 import TimetableSelector from '../components/TimetableSelector';
+import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -65,54 +66,36 @@ function StatCard({ label, value, color }: { label: string; value: number | stri
 }
 
 function ExamCard({
-  assignment, onDelete, onMove, onDragStart, onDragEnd, disabled,
+  assignment, onShowDetails, onDragStart, onDragEnd, disabled,
 }: {
   assignment: TimetableAssignment;
-  onDelete: () => void;
-  onMove: () => void;
+  onShowDetails: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
   disabled: boolean;
 }) {
   const color = YEAR_COLORS[(assignment.course?.studyYear ?? 1) - 1] ?? '#3b82f6';
+  const shortCode = (assignment.course?.code ?? '').replace(/^CEID_/, '');
   return (
     <div
-      onClick={e => e.stopPropagation()}
+      onClick={e => { e.stopPropagation(); onShowDetails(); }}
       draggable={true}
       onDragStart={e => { e.stopPropagation(); onDragStart(); }}
       onDragEnd={e => { e.stopPropagation(); onDragEnd(); }}
-      style={{ background: '#0a1628', borderLeft: `3px solid ${color}`, borderRadius: '6px', padding: '6px 8px', color: '#e2e8f0', cursor:         'grab' }}
+      title={assignment.course?.code}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
+        background: '#0a1628', borderLeft: `3px solid ${color}`, borderRadius: '4px',
+        padding: '2px 6px', color: '#e2e8f0', fontSize: '11px', fontWeight: 700,
+        fontFamily: 'JetBrains Mono, monospace', cursor: 'grab', whiteSpace: 'nowrap',
+        flex: '0 0 auto', maxWidth: '100%', opacity: disabled ? 0.6 : 1,
+      }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-        <div style={{ fontWeight: 700, fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', color }}>
-          {assignment.course?.code}
-          {assignment.course?.visibleInTimetable === false && (
-            <span title="Σε συνεννόηση — δεν εμφανίζεται στο δημόσιο πρόγραμμα"
-                  style={{ marginLeft: 4, fontSize: '10px' }}>🤝</span>
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: '3px' }}>
-          <button
-            onClick={e => { e.stopPropagation(); onMove(); }}
-            disabled={disabled}
-            title="Μετακίνηση"
-            style={{ border: 'none', borderRadius: '4px', background: 'rgba(59,130,246,0.2)', color: '#93c5fd', cursor: 'pointer', padding: '1px 5px', fontSize: '11px' }}
-          >⇄</button>
-          <button
-            onClick={e => { e.stopPropagation(); onDelete(); }}
-            disabled={disabled}
-            title="Διαγραφή"
-            style={{ border: 'none', borderRadius: '4px', background: 'rgba(239,68,68,0.15)', color: '#f87171', cursor: 'pointer', padding: '1px 5px', fontSize: '11px' }}
-          >×</button>
-        </div>
-      </div>
-      <div style={{ fontSize: '11px', lineHeight: 1.2, marginTop: '2px', color: '#cbd5e1' }}>{assignment.course?.name}</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginTop: '3px', color: '#475569' }}>
-        <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{assignment.room?.code}</span>
-        <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-          {assignment.examDurationMinutes ? `${assignment.examDurationMinutes/60}h` : '3h'}
-        </span>
-      </div>
+      {shortCode}
+      {assignment.course?.visibleInTimetable === false && (
+        <span title="Σε συνεννόηση — δεν εμφανίζεται στο δημόσιο πρόγραμμα"
+              style={{ fontSize: '10px' }}>🤝</span>
+      )}
     </div>
   );
 }
@@ -253,6 +236,7 @@ export default function ExamTimetable() {
   const [addHour,      setAddHour]      = useState('');
   const [examDuration, setExamDuration] = useState(180);
   const [movingAssignment,  setMovingAssignment]  = useState<TimetableAssignment | null>(null);
+  const [detailsAssignment, setDetailsAssignment] = useState<TimetableAssignment | null>(null);
   const [draggingAssignment,setDraggingAssignment]= useState<TimetableAssignment | null>(null);
 
   const [loading, setLoading]               = useState(false);
@@ -318,6 +302,18 @@ export default function ExamTimetable() {
     }
     return Array.from(s).sort();
   }, [examTimeSlots, selectedTimetable]);
+
+  // Πρώτες ημερομηνίες κάθε εβδομάδας: κενό ≥ 2 ημερών (π.χ. Σαββατοκύριακο) = νέα εβδομάδα.
+  const weekStartDates = useMemo(() => {
+    const set = new Set<string>();
+    examDates.forEach((d, i) => {
+      if (i === 0) return; // η πρώτη στήλη είναι ήδη στην άκρη — χωρίς separator
+      const prev = new Date(examDates[i - 1] + 'T00:00:00').getTime();
+      const cur = new Date(d + 'T00:00:00').getTime();
+      if ((cur - prev) / 86400000 >= 2) set.add(d);
+    });
+    return set;
+  }, [examDates]);
 
   const eligibleCourses = useMemo(() =>
     getEligibleCourses(courses, selectedTimetable), [courses, selectedTimetable]);
@@ -770,7 +766,7 @@ export default function ExamTimetable() {
           )}
 
           {/* Grid + Right Panel */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '1.5rem', alignItems: 'start' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem', alignItems: 'start' }}>
 
             {/* Grid */}
             <section style={{ background: '#0d1b2e', border: '1px solid #1a2744', borderRadius: '12px', overflow: 'hidden' }}>
@@ -782,19 +778,22 @@ export default function ExamTimetable() {
               )}
               {examDates.length > 0 && (
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', minWidth: `${100 + examDates.length * 145}px`, borderCollapse: 'collapse' }}>
+                  <table style={{ width: '100%', minWidth: `${64 + examDates.length * 96}px`, borderCollapse: 'collapse' }}>
                     <thead>
                       <tr>
                         <th style={thStyle}>Ώρα</th>
                         {examDates.map(date => (
-                          <th key={date} style={thStyle}>{formatDateHeader(date)}</th>
+                          <th
+                            key={date}
+                            style={weekStartDates.has(date) ? { ...thStyle, borderLeft: '3px solid #2563eb' } : thStyle}
+                          >{formatDateHeader(date)}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {EXAM_HOURS.map(hour => (
                         <tr key={hour}>
-                          <td style={{ ...tdStyle, width: '90px', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
+                          <td style={{ ...tdStyle, width: '56px', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
                             {hour}
                           </td>
                           {examDates.map(date => {
@@ -822,6 +821,7 @@ export default function ExamTimetable() {
                                   borderLeft:
                                     hint === 'allowed' ? '3px solid #22c55e' :
                                     hint === 'blocked' ? '3px solid #7f1d1d' :
+                                    weekStartDates.has(date) ? '3px solid #2563eb' :
                                     '1px solid #1a2744',
                                 }}
                               >
@@ -830,13 +830,12 @@ export default function ExamTimetable() {
                                 ) : cellAssignments.length === 0 ? (
                                   <span style={{ color: '#1e3a5f', fontSize: '11px' }}>+ Προσθήκη</span>
                                 ) : (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', alignItems: 'flex-start' }}>
                                     {cellAssignments.map(a => (
                                       <ExamCard
                                         key={a.id}
                                         assignment={a}
-                                        onDelete={() => removeAssignment(a.id)}
-                                        onMove={() => setMovingAssignment(a)}
+                                        onShowDetails={() => setDetailsAssignment(a)}
                                         onDragStart={() => setDraggingAssignment(a)}
                                         onDragEnd={() => setDraggingAssignment(null)}
                                         disabled={saving}
@@ -855,8 +854,8 @@ export default function ExamTimetable() {
               )}
             </section>
 
-            {/* Right Panel */}
-            <aside style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {/* Right Panel → ρέει κάτω full-width (mirror εβδομαδιαίου), panels δίπλα-δίπλα */}
+            <aside style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-start' }}>
 
               {/* ── Αδιάθετες εξετάσεις ──────────────────────────────── */}
               {progress && progress.missingCourses.length > 0 && (
@@ -1085,6 +1084,15 @@ export default function ExamTimetable() {
         </div>
       )}
 
+      {/* Details modal (shared με το εβδομαδιαίο) — chip click → λεπτομέρειες + actions */}
+      <AssignmentDetailsModal
+        assignment={detailsAssignment}
+        onClose={() => setDetailsAssignment(null)}
+        onMove={() => { if (detailsAssignment) setMovingAssignment(detailsAssignment); setDetailsAssignment(null); }}
+        onDelete={() => { if (detailsAssignment) removeAssignment(detailsAssignment.id); setDetailsAssignment(null); }}
+        disabled={saving}
+      />
+
       {/* Move modal */}
       {movingAssignment && (
         <ExamMoveModal
@@ -1104,19 +1112,20 @@ export default function ExamTimetable() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const thStyle: CSSProperties = {
-  padding: '10px 12px', background: '#0a1628', color: '#94a3b8',
-  borderBottom: '1px solid #1a2744', textAlign: 'left',
+  padding: '6px 6px', background: '#0a1628', color: '#94a3b8',
+  borderBottom: '1px solid #1a2744', textAlign: 'center',
   fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap',
 };
 
 const tdStyle: CSSProperties = {
-  padding: '8px', verticalAlign: 'top',
+  padding: '4px', verticalAlign: 'top',
   borderBottom: '1px solid #1a2744', borderRight: '1px solid #1a2744',
-  minHeight: '72px', minWidth: '130px',
+  minHeight: '72px', minWidth: '88px',
 };
 
 const panelStyle: CSSProperties = {
   background: '#0d1b2e', border: '1px solid #1a2744', borderRadius: '10px', padding: '1rem',
+  flex: '1 1 320px',
 };
 
 const panelTitle: CSSProperties = {

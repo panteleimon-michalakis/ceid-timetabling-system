@@ -14,6 +14,7 @@ const assignmentTypeLabels: Record<string, string> = {
 const DAY_LABELS: Record<string, string> = {
   MONDAY: 'Δευτέρα', TUESDAY: 'Τρίτη', WEDNESDAY: 'Τετάρτη',
   THURSDAY: 'Πέμπτη', FRIDAY: 'Παρασκευή',
+  SATURDAY: 'Σάββατο', SUNDAY: 'Κυριακή',
 };
 
 const courseTypeLabels: Record<string, string> = {
@@ -55,6 +56,13 @@ export default function AssignmentDetailsModal({ assignment, onClose, onMove, on
     ? `${DAY_LABELS[timeSlot.dayOfWeek] ?? timeSlot.dayOfWeek} ${normalizeTime(timeSlot.startTime)}–${normalizeTime(timeSlot.endTime)}`
     : '—';
 
+  // Exam-aware κλάδος: για εξέταση το slot έχει specificDate (όχι εβδομαδιαίο dayOfWeek/ώρες).
+  const isExam = assignment.assignmentType === 'EXAM';
+  const examDateText = timeSlot?.specificDate
+    ? `${new Date(timeSlot.specificDate + 'T00:00:00').toLocaleDateString('el-GR', { weekday: 'long', day: '2-digit', month: '2-digit' })} ${normalizeTime(timeSlot.startTime)}`
+    : slotText;
+  const examDurationText = assignment.examDurationMinutes ? `${assignment.examDurationMinutes / 60}h` : '3h';
+
   const rows: Array<{ label: string; value: string | number }> = [
     { label: 'Όνομα', value: course?.name ?? '—' },
     { label: 'Διδάσκων(-οντες)', value: teachers },
@@ -62,11 +70,15 @@ export default function AssignmentDetailsModal({ assignment, onClose, onMove, on
     { label: 'Αίθουσα', value: room ? `${room.code} — ${room.name}` : '—' },
     { label: 'Χωρητικότητα', value: room?.capacity ?? '—' },
     { label: 'Εκτιμ. φοιτητές', value: course?.expectedStudents ?? '—' },
-    { label: 'Ώρες', value: `Θ:${course?.lectureHours ?? 0} Φ:${course?.tutorialHours ?? 0} Ε:${course?.labHours ?? 0}` },
+    // Οι ώρες Θ/Φ/Ε αφορούν εβδομαδιαίο μάθημα — άσχετες για εξέταση.
+    ...(isExam ? [] : [{ label: 'Ώρες', value: `Θ:${course?.lectureHours ?? 0} Φ:${course?.tutorialHours ?? 0} Ε:${course?.labHours ?? 0}` }]),
     { label: 'Εξάμηνο / Έτος', value: `${course?.semester ?? '—'} / ${course?.studyYear ?? '—'}` },
     { label: 'Τύπος μαθήματος', value: courseTypeLabel },
     { label: 'ECTS', value: course?.ects ?? '—' },
-    { label: 'Slot', value: slotText },
+    // Εξέταση: ημερομηνία + διάρκεια· εβδομαδιαίο: slot (dayOfWeek + ώρες).
+    ...(isExam
+      ? [{ label: 'Ημερομηνία', value: examDateText }, { label: 'Διάρκεια', value: examDurationText }]
+      : [{ label: 'Slot', value: slotText }]),
   ];
 
   return (
