@@ -511,3 +511,25 @@ FUTURE WORK: το `study_year` θα ήταν ασφαλέστερο ως **deriv
 (computed `ceil(semester/2)` αντί stored field) — θα απέκλειε εξ ορισμού αυτή την κατηγορία bug
 (stored-but-stale). Σήμερα είναι αποθηκευμένο πεδίο σε πολλά σημεία (entity, seeder, solver POJOs,
 snapshot), οπότε η μετατροπή είναι ξεχωριστό refactor — σημειωμένο, εκτός scope εδώ.
+
+## Frontend — Validation UX & εξεταστική όψη
+
+### [80da781] Validation — scoped issue location resolver (ASSIGNMENT_SCOPED allow-list)
+Το `referenceId` των validation issues είναι **πολυμορφικό** (assignment id / course id / null
+ανά code). Ο shared resolver στο `ValidationIssuesModal` επιλύει το «πότε;» (ημερομηνία+ώρα)
+**μόνο** για allow-list **ASSIGNMENT_SCOPED** codes [`INVALID_ASSIGNMENT`, `SEMESTER_MISMATCH`,
+`LAB_ROOM_REQUIRED`, `FIRST_YEAR_ROOM`, `REQUIRED_ROOM`, `SHARED_EXAM_ROOM`, `ROOM_CONFLICT`,
+`SAME_COURSE_SAME_SLOT`, `TEACHER_CONFLICT`, `REQUIRED_YEAR_EXAM_SAME_DATE`,
+`REQUIRED_YEAR_CONFLICT`], αποφεύγοντας λάθος τοποθεσία σε course-scoped issues.
+
+### [80da781] UX/future-work — εξεταστική όψη horizontal scroll
+Η εξεταστική όψη χρησιμοποιεί **horizontal scroll** για μεγάλες εξεταστικές περιόδους.
+Responsive πύκνωση στηλών (fit-to-viewport με sticky στήλη ώρας) αφέθηκε ως **future work**.
+
+## Backend — Φ2a Course↔Teacher M2M sync
+
+### [Φ2a] Course↔Teacher M2M — inverted authority
+Το course_teachers M2M είναι source-of-truth για τη σχέση διδασκόντων-μαθημάτων· το teachersText παράγεται derived (buildTeachersText, PRIMARY-first) ως display cache για DTO/snapshot/conflict-fallbacks. Structured endpoints: GET/PUT /courses/{id}/teachers, PUT /teachers/{id}/courses (role-aware, με owner-check). Ο solver ήταν ήδη M2M-authoritative → μηδενική αλλαγή baseline.
+
+### [Φ2a] Role-aware M2M
+Το unique (course,teacher,role) επιτρέπει τον ίδιο διδάσκοντα σε πολλαπλούς ρόλους ανά μάθημα (PRIMARY/SECONDARY/LAB_INSTRUCTOR/TUTORIAL_INSTRUCTOR).
