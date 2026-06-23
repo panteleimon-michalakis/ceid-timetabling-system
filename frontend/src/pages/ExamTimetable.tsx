@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { courseService, roomService, timeSlotService, timetableService } from '../api/services';
 import type {
   Course, PlacementOption, PlacementOptionsResponse,
   Room, TimeSlot, Timetable,
-  TimetableAssignment, TimetableProgress, TimetableValidationReport,
+  TimetableAssignment, TimetableProgress, TimetableValidationReport, ValidationIssue,
 } from '../types';
 import TimetableSelector from '../components/TimetableSelector';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
+import ValidationIssuesModal from '../components/ValidationIssuesModal';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,18 @@ const EXAM_DURATIONS = [
   { label: '4 ώρες',   value: 240 },
 ];
 const YEAR_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+// Μονό ελληνικό γράμμα ημέρας ανά Date.getDay() (0=Κυρ … 6=Σαβ).
+// Η ασάφεια Τ/Τ (Τρ/Τε) & Π/Π (Πε/Πα) είναι αποδεκτή — η ημερομηνία ξεχωρίζει.
+const WEEKDAY_LETTER = ['Κ', 'Δ', 'Τ', 'Τ', 'Π', 'Π', 'Σ'];
+
+// Validation codes των οποίων το referenceId ΕΙΝΑΙ assignment id (→ επιλύονται σε
+// συγκεκριμένη χρονοθυρίδα). Τα υπόλοιπα codes έχουν course id ή null — ΜΗΝ τα
+// αναζητάς στο assignments-by-id (θα έδιναν λάθος/τυχαία τοποθεσία).
+const ASSIGNMENT_SCOPED = new Set([
+  'INVALID_ASSIGNMENT', 'SEMESTER_MISMATCH', 'LAB_ROOM_REQUIRED', 'FIRST_YEAR_ROOM',
+  'REQUIRED_ROOM', 'SHARED_EXAM_ROOM', 'ROOM_CONFLICT', 'SAME_COURSE_SAME_SLOT',
+  'TEACHER_CONFLICT', 'REQUIRED_YEAR_EXAM_SAME_DATE', 'REQUIRED_YEAR_CONFLICT',
+]);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -31,10 +44,8 @@ function normalizeTime(v?: string | null) {
 function formatDateHeader(dateStr: string) {
   try {
     const d = new Date(dateStr + 'T00:00:00');
-    const day = d.toLocaleDateString('el-GR', { weekday: 'short' });
-    const num = d.getDate();
-    const mon = d.getMonth() + 1;
-    return `${day} ${num}/${mon}`;
+    const letter = WEEKDAY_LETTER[d.getDay()];
+    return `${letter} ${d.getDate()}/${d.getMonth() + 1}`;
   } catch { return dateStr; }
 }
 
@@ -56,9 +67,17 @@ function getEligibleCourses(courses: Course[], timetable: Timetable | undefined)
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StatCard({ label, value, color }: { label: string; value: number | string; color: string }) {
+function StatCard({ label, value, color, onClick }: { label: string; value: number | string; color: string; onClick?: () => void }) {
   return (
-    <div style={{ padding: '1rem', background: '#0d1b2e', border: '1px solid #1a2744', borderTop: `2px solid ${color}`, borderRadius: '10px' }}>
+    <div
+      onClick={onClick}
+      title={onClick ? 'Κλικ για λεπτομέρειες' : undefined}
+      style={{
+        padding: '1rem', background: '#0d1b2e', border: '1px solid #1a2744',
+        borderTop: `2px solid ${color}`, borderRadius: '10px',
+        cursor: onClick ? 'pointer' : 'default',
+      }}
+    >
       <div style={{ fontSize: '22px', fontWeight: 600, color, fontFamily: 'JetBrains Mono, monospace' }}>{value}</div>
       <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>{label}</div>
     </div>
@@ -101,11 +120,12 @@ function ExamCard({
 }
 
 function ExamMoveModal({
-  assignment, rooms, examTimeSlots, onMoved, onClose, onError, onSuccess,
+  assignment, rooms, examTimeSlots, availableDates, onMoved, onClose, onError, onSuccess,
 }: {
   assignment: TimetableAssignment;
   rooms: Room[];
   examTimeSlots: TimeSlot[];
+  availableDates: string[];
   onMoved: () => void;
   onClose: () => void;
   onError: (msg: string) => void;
@@ -119,12 +139,6 @@ function ExamMoveModal({
   const [selHour, setSelHour] = useState(currentHour);
   const [selRoomId, setSelRoomId] = useState(currentRoomId);
   const [saving, setSaving] = useState(false);
-
-  const availableDates = useMemo(() => {
-    const s = new Set<string>();
-    for (const ts of examTimeSlots) { if (ts.specificDate) s.add(ts.specificDate); }
-    return Array.from(s).sort();
-  }, [examTimeSlots]);
 
   const hasChanged = selDate !== currentDate || selHour !== currentHour || selRoomId !== currentRoomId;
 
@@ -238,6 +252,7 @@ export default function ExamTimetable() {
   const [movingAssignment,  setMovingAssignment]  = useState<TimetableAssignment | null>(null);
   const [detailsAssignment, setDetailsAssignment] = useState<TimetableAssignment | null>(null);
   const [draggingAssignment,setDraggingAssignment]= useState<TimetableAssignment | null>(null);
+  const [issuesModal,       setIssuesModal]       = useState<'ERROR' | 'WARNING' | null>(null);
 
   const [loading, setLoading]               = useState(false);
   const [loadingOptions, setLoadingOptions] = useState(false);
@@ -340,6 +355,19 @@ export default function ExamTimetable() {
     }
     return map;
   }, [placementOptions]);
+
+  // «Πότε;» resolver για το ValidationIssuesModal — μόνο για assignment-scoped codes.
+  const byId = useMemo(() => new Map(assignments.map(a => [a.id, a])), [assignments]);
+
+  const resolveLocation = useCallback((issue: ValidationIssue): string | null => {
+    if (issue.referenceId == null || !ASSIGNMENT_SCOPED.has(issue.code)) return null;
+    const a = byId.get(issue.referenceId);
+    if (!a?.timeSlot) return null;
+    const t = normalizeTime(a.timeSlot.startTime);
+    return a.timeSlot.specificDate
+      ? `${formatDateHeader(a.timeSlot.specificDate)} ${t}`
+      : `${a.timeSlot.dayOfWeek ?? ''} ${t}`.trim();
+  }, [byId]);
 
   function getExamSlotId(date: string, hour: string): number | undefined {
     return examTimeSlots.find(ts =>
@@ -723,8 +751,8 @@ export default function ExamTimetable() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', margin: '1.5rem 0' }}>
             <StatCard label="Τοποθετημένες εξετάσεις" value={assignments.length} color="#3b82f6" />
             <StatCard label="Πρόοδος" value={`${progress?.percentage ?? 0}%`} color="#10b981" />
-            <StatCard label="Errors"   value={validation?.errorCount ?? 0}   color={(validation?.errorCount ?? 0) > 0 ? '#ef4444' : '#22c55e'} />
-            <StatCard label="Warnings" value={validation?.warningCount ?? 0} color={(validation?.warningCount ?? 0) > 0 ? '#f59e0b' : '#22c55e'} />
+            <StatCard label="Errors"   value={validation?.errorCount ?? 0}   color={(validation?.errorCount ?? 0) > 0 ? '#ef4444' : '#22c55e'} onClick={() => setIssuesModal('ERROR')} />
+            <StatCard label="Warnings" value={validation?.warningCount ?? 0} color={(validation?.warningCount ?? 0) > 0 ? '#f59e0b' : '#22c55e'} onClick={() => setIssuesModal('WARNING')} />
           </div>
 
           {/* ── Μπάρα προόδου εξεταστικής ─────────────────────────────── */}
@@ -1001,10 +1029,22 @@ export default function ExamTimetable() {
                 </section>
               )}
 
+              {/* Validation errors (mirror weekly «Πρώτα σφάλματα») */}
+              {validation && validation.errors.length > 0 && (
+                <section style={panelStyle}>
+                  <h3 style={panelTitle}>Πρώτα σφάλματα ({validation.errorCount})</h3>
+                  <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    {validation.errors.slice(0, 8).map((e, i) => (
+                      <div key={i} style={{ color: '#f87171', fontSize: '11px', marginBottom: '4px', lineHeight: 1.35 }}>{e.message}</div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {/* Validation warnings */}
               {validation && validation.warnings.length > 0 && (
                 <section style={panelStyle}>
-                  <h3 style={panelTitle}>Warnings ({validation.warningCount})</h3>
+                  <h3 style={panelTitle}>Πρώτα προειδοποιήσεις ({validation.warningCount})</h3>
                   <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
                     {validation.warnings.slice(0, 8).map((w, i) => (
                       <div key={i} style={{ color: '#fbbf24', fontSize: '11px', marginBottom: '4px', lineHeight: 1.35 }}>{w.message}</div>
@@ -1099,12 +1139,21 @@ export default function ExamTimetable() {
           assignment={movingAssignment}
           rooms={rooms}
           examTimeSlots={examTimeSlots}
+          availableDates={examDates}
           onMoved={async () => { setMovingAssignment(null); await reloadTimetableData(); }}
           onClose={() => setMovingAssignment(null)}
           onError={setError}
           onSuccess={setMessage}
         />
       )}
+
+      {/* Issues modal (shared με το εβδομαδιαίο) — κλικ σε Errors/Warnings StatCard */}
+      <ValidationIssuesModal
+        severity={issuesModal}
+        issues={issuesModal === 'ERROR' ? (validation?.errors ?? []) : issuesModal === 'WARNING' ? (validation?.warnings ?? []) : []}
+        onClose={() => setIssuesModal(null)}
+        getLocation={resolveLocation}
+      />
     </div>
   );
 }

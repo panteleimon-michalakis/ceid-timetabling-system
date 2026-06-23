@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import api from '../api/client';
 import { courseService, roomService, timeSlotService, timetableService } from '../api/services';
@@ -11,6 +11,7 @@ import type {
   TimetableAssignment,
   TimetableProgress,
   TimetableValidationReport,
+  ValidationIssue,
 } from '../types';
 import TimetableSelector from '../components/TimetableSelector';
 import MoveAssignmentModal from '../components/MoveAssignmentModal';
@@ -37,6 +38,15 @@ function dayLabel(day?: string | null): string {
   if (!day) return '';
   return DAY_LABELS[day] ?? day;
 }
+
+// Validation codes των οποίων το referenceId ΕΙΝΑΙ assignment id (→ επιλύονται σε
+// συγκεκριμένη χρονοθυρίδα). Ίδιο set με το ExamTimetable. Τα υπόλοιπα codes έχουν
+// course id ή null — ΜΗΝ τα αναζητάς στο assignments-by-id.
+const ASSIGNMENT_SCOPED = new Set([
+  'INVALID_ASSIGNMENT', 'SEMESTER_MISMATCH', 'LAB_ROOM_REQUIRED', 'FIRST_YEAR_ROOM',
+  'REQUIRED_ROOM', 'SHARED_EXAM_ROOM', 'ROOM_CONFLICT', 'SAME_COURSE_SAME_SLOT',
+  'TEACHER_CONFLICT', 'REQUIRED_YEAR_EXAM_SAME_DATE', 'REQUIRED_YEAR_CONFLICT',
+]);
 
 const HOURS = [
   '09:00', '10:00', '11:00', '12:00', '13:00', '14:00',
@@ -276,6 +286,23 @@ export default function WeeklyTimetable() {
 
     return map;
   }, [assignments]);
+
+  // «Πότε;» resolver για το ValidationIssuesModal — μόνο για assignment-scoped codes.
+  // Weekly: δεν υπάρχει specificDate → πάντα το dayOfWeek branch.
+  const assignmentsById = useMemo(
+    () => new Map(assignments.map((a) => [a.id, a])),
+    [assignments]
+  );
+
+  const resolveLocation = useCallback((issue: ValidationIssue): string | null => {
+    if (issue.referenceId == null || !ASSIGNMENT_SCOPED.has(issue.code)) return null;
+    const a = assignmentsById.get(issue.referenceId);
+    if (!a?.timeSlot) return null;
+    const t = normalizeTime(a.timeSlot.startTime);
+    return a.timeSlot.specificDate
+      ? `${a.timeSlot.specificDate} ${t}`.trim()
+      : `${dayLabel(a.timeSlot.dayOfWeek)} ${t}`.trim();
+  }, [assignmentsById]);
 
 const slotHintMap = useMemo(() => {
     const map = new Map<string, 'allowed' | 'blocked'>();
@@ -1540,6 +1567,7 @@ async function runSolver() {
         : []
         }
         onClose={() => setIssuesModal(null)}
+        getLocation={resolveLocation}
       />
     </div>
   );

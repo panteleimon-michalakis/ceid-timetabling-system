@@ -5,9 +5,13 @@ interface ValidationIssuesModalProps {
   severity: 'ERROR' | 'WARNING' | null;
   issues: ValidationIssue[];
   onClose: () => void;
+  /** Προαιρετικός resolver «πότε;» (ημέρα/ημερομηνία + ώρα) ανά issue. Επιστρέφει
+   *  null για issues που δεν αντιστοιχούν σε συγκεκριμένη χρονοθυρίδα. Αν παραλειφθεί,
+   *  το modal συμπεριφέρεται ακριβώς όπως πριν. */
+  getLocation?: (issue: ValidationIssue) => string | null;
 }
 
-export default function ValidationIssuesModal({ severity, issues, onClose }: ValidationIssuesModalProps) {
+export default function ValidationIssuesModal({ severity, issues, onClose, getLocation }: ValidationIssuesModalProps) {
   if (severity === null) return null;
 
   const isError = severity === 'ERROR';
@@ -29,7 +33,9 @@ export default function ValidationIssuesModal({ severity, issues, onClose }: Val
           <div style={{ color: '#64748b', fontSize: '0.9rem' }}>{emptyText}</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {issues.map((issue, index) => (
+            {issues.map((issue, index) => {
+              const location = getLocation?.(issue) ?? null;
+              return (
               <div
                 key={`${issue.code}-${issue.referenceId}-${index}`}
                 style={{
@@ -42,11 +48,19 @@ export default function ValidationIssuesModal({ severity, issues, onClose }: Val
                 <div style={{ color: '#e2e8f0', fontSize: '0.88rem', lineHeight: 1.35 }}>
                   {issue.message}
                 </div>
-                <div style={{ color: '#64748b', fontSize: '0.7rem', marginTop: '0.2rem', fontFamily: 'JetBrains Mono, monospace' }}>
-                  {issue.code}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
+                  <span style={{ color: '#64748b', fontSize: '0.7rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {issue.code}
+                  </span>
+                  {location && (
+                    <span style={{ color: accent, fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                      📅 {location}
+                    </span>
+                  )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
