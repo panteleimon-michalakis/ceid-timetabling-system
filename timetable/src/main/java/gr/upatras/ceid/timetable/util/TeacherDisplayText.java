@@ -1,5 +1,7 @@
 package gr.upatras.ceid.timetable.util;
 
+import gr.upatras.ceid.timetable.entity.CourseTeacher;
+
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -10,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * Κανονικοποίηση & εμφάνιση ονομάτων διδασκόντων από το ελεύθερο
@@ -38,6 +41,48 @@ public final class TeacherDisplayText {
         );
 
         return String.join(", ", sortedNames);
+    }
+
+    /**
+     * Παράγει το canonical {@code teachersText} ΑΠΟ τις M2M σχέσεις ενός μαθήματος
+     * (αντίστροφη φορά εξουσίας: {@code course_teachers} = source-of-truth, το
+     * {@code teachersText} = παράγωγο για display/snapshot/fallback).
+     *
+     * <p>Σειρά: ρόλος (PRIMARY → SECONDARY → LAB_INSTRUCTOR → TUTORIAL_INSTRUCTOR,
+     * κατά {@link CourseTeacher.Role} ordinal) και σε ισοπαλία αλφαβητικά
+     * (accent-insensitive) κατά όνομα → ντετερμινιστικό output. Ο format είναι ο
+     * ΙΔΙΟΣ με τον υπάρχοντα display ({@code String.join(", ", names)}) ώστε το
+     * {@link #normalizeTeachersTextForDto(String)} του παραγόμενου string να είναι
+     * σταθερό (idempotent) και ΟΛΑ τα read-paths (DTO render, snapshot stamping,
+     * conflict fallbacks) να μένουν αμετάβλητα.
+     */
+    public static String buildTeachersText(List<CourseTeacher> relations) {
+        if (relations == null || relations.isEmpty()) {
+            return "";
+        }
+
+        return relations.stream()
+                .filter(Objects::nonNull)
+                .filter(ct -> ct.getTeacher() != null
+                        && ct.getTeacher().getName() != null
+                        && !ct.getTeacher().getName().isBlank())
+                .sorted(
+                        Comparator
+                                .comparingInt((CourseTeacher ct) -> rolePriority(ct.getRole()))
+                                .thenComparing(ct -> normalizeSortKey(ct.getTeacher().getName()))
+                )
+                .map(ct -> ct.getTeacher().getName().trim())
+                .distinct()
+                .collect(Collectors.joining(", "));
+    }
+
+    /**
+     * Προτεραιότητα ρόλου για σταθερή σειρά (μικρότερο = πρώτο). Στηρίζεται στη
+     * δηλωμένη σειρά του {@link CourseTeacher.Role} (PRIMARY δηλώνεται πρώτο).
+     * null role → PRIMARY.
+     */
+    private static int rolePriority(CourseTeacher.Role role) {
+        return role == null ? CourseTeacher.Role.PRIMARY.ordinal() : role.ordinal();
     }
 
     /** Map από κανονικοποιημένο key → καλύτερο display name (dedup co-taught). */

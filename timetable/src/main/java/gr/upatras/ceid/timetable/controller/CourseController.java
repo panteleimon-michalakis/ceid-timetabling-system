@@ -1,9 +1,15 @@
 package gr.upatras.ceid.timetable.controller;
 
 import gr.upatras.ceid.timetable.entity.Course;
+import gr.upatras.ceid.timetable.entity.CourseTeacher;
+import gr.upatras.ceid.timetable.entity.Teacher;
 import gr.upatras.ceid.timetable.repository.CourseRepository;
+import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
+import gr.upatras.ceid.timetable.repository.TeacherRepository;
+import gr.upatras.ceid.timetable.util.TeacherDisplayText;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.text.Normalizer;
@@ -17,10 +23,22 @@ public class CourseController {
     private static final Sort COURSE_SORT = Sort.by("studyYear", "semester", "code");
 
     private final CourseRepository courseRepo;
+    private final CourseTeacherRepository courseTeacherRepo;
+    private final TeacherRepository teacherRepo;
 
-    public CourseController(CourseRepository courseRepo) {
+    public CourseController(CourseRepository courseRepo,
+                           CourseTeacherRepository courseTeacherRepo,
+                           TeacherRepository teacherRepo) {
         this.courseRepo = courseRepo;
+        this.courseTeacherRepo = courseTeacherRepo;
+        this.teacherRepo = teacherRepo;
     }
+
+    /**
+     * Structured αναφορά διδάσκοντα για τα M2M sync endpoints. Το {@code role}
+     * είναι προαιρετικό· null/blank → {@link CourseTeacher.Role#PRIMARY}.
+     */
+    public record TeacherRef(Long teacherId, String role) {}
 
     @GetMapping
     public List<Map<String, Object>> getAll() {
@@ -107,6 +125,103 @@ public class CourseController {
             return ResponseEntity.noContent().build();
         }
         return ResponseEntity.notFound().build();
+    }
+
+    // ── Teacher M2M sync (course_teachers = source-of-truth, teachersText derived) ──
+
+    /** Οι διδάσκοντες του μαθήματος ως {@code [{teacherId, teacherName, role}]}. */
+    @GetMapping("/{id}/teachers")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> getCourseTeachers(@PathVariable Long id) {
+        if (!courseRepo.existsById(id)) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(teacherRelationsToDto(courseTeacherRepo.findByCourseId(id)));
+    }
+
+    /**
+     * Αντικαθιστά (replace-set) τους διδάσκοντες του μαθήματος από structured input
+     * (teacherId + role) και αναπαράγει το {@code teachersText} ως παράγωγο
+     * (PRIMARY-first). Το {@code course_teachers} M2M είναι η authoritative πηγή του
+     * solver — εδώ απλώς αλλάζει το ΠΟΙΟΣ το γράφει (structured API αντί CSV import).
+     */
+    @PutMapping("/{id}/teachers")
+    @Transactional
+    public ResponseEntity<?> setCourseTeachers(@PathVariable Long id,
+                                               @RequestBody List<TeacherRef> body) {
+        Course course = courseRepo.findById(id).orElse(null);
+        if (course == null) return ResponseEntity.notFound().build();
+
+        // desired set (teacherId, role)· validate κάθε teacherId + role
+        LinkedHashMap<RelationKey, Teacher> desired = new LinkedHashMap<>();
+        if (body != null) {
+            for (TeacherRef ref : body) {
+                if (ref == null || ref.teacherId() == null) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "error", "Απαιτείται teacherId σε κάθε εγγραφή."));
+                }
+                CourseTeacher.Role role;
+                try {
+                    role = parseRole(ref.role());
+                } catch (IllegalArgumentException ex) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "error", "Άγνωστος ρόλος διδάσκοντα: " + ref.role()));
+                }
+                Teacher teacher = teacherRepo.findById(ref.teacherId()).orElse(null);
+                if (teacher == null) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "error", "Δεν βρέθηκε διδάσκων με id " + ref.teacherId()));
+                }
+                desired.put(new RelationKey(ref.teacherId(), role), teacher);
+            }
+        }
+
+        List<CourseTeacher> existing = courseTeacherRepo.findByCourseId(id);
+
+        // delete όσα existing δεν είναι στο desired
+        for (CourseTeacher ct : existing) {
+            RelationKey key = new RelationKey(ct.getTeacher().getId(), ct.getRole());
+            if (!desired.containsKey(key)) {
+                courseTeacherRepo.delete(ct);
+            }
+        }
+
+        // insert όσα desired λείπουν (σεβασμός unique (course,teacher,role))
+        for (Map.Entry<RelationKey, Teacher> e : desired.entrySet()) {
+            RelationKey key = e.getKey();
+            if (!courseTeacherRepo.existsByCourseIdAndTeacherIdAndRole(id, key.id(), key.role())) {
+                courseTeacherRepo.save(CourseTeacher.builder()
+                        .course(course).teacher(e.getValue()).role(key.role()).build());
+            }
+        }
+
+        // regenerate teachersText (derived, PRIMARY-first)
+        List<CourseTeacher> updated = courseTeacherRepo.findByCourseId(id);
+        course.setTeachersText(TeacherDisplayText.buildTeachersText(updated));
+        courseRepo.save(course);
+
+        return ResponseEntity.ok(teacherRelationsToDto(updated));
+    }
+
+    /** Κλειδί ζεύγους (teacherId|courseId, role) για diff/dedup των M2M σχέσεων. */
+    private record RelationKey(Long id, CourseTeacher.Role role) {}
+
+    /** null/blank role → PRIMARY· άγνωστο → {@link IllegalArgumentException} (→ 400). */
+    static CourseTeacher.Role parseRole(String role) {
+        if (role == null || role.isBlank()) {
+            return CourseTeacher.Role.PRIMARY;
+        }
+        return CourseTeacher.Role.valueOf(role.trim().toUpperCase(Locale.ROOT));
+    }
+
+    private List<Map<String, Object>> teacherRelationsToDto(List<CourseTeacher> relations) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (CourseTeacher ct : relations) {
+            Map<String, Object> dto = new LinkedHashMap<>();
+            dto.put("teacherId",   ct.getTeacher().getId());
+            dto.put("teacherName", ct.getTeacher().getName());
+            dto.put("role",        ct.getRole() != null ? ct.getRole().name() : null);
+            result.add(dto);
+        }
+        return result;
     }
 
     private Map<String, Object> courseToDto(Course course) {

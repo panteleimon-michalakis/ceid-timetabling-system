@@ -1,8 +1,10 @@
 package gr.upatras.ceid.timetable.controller;
 
+import gr.upatras.ceid.timetable.entity.Course;
 import gr.upatras.ceid.timetable.entity.CourseTeacher;
 import gr.upatras.ceid.timetable.entity.Teacher;
 import gr.upatras.ceid.timetable.entity.TeacherConstraint;
+import gr.upatras.ceid.timetable.repository.CourseRepository;
 import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
 import gr.upatras.ceid.timetable.repository.TeacherConstraintRepository;
 import gr.upatras.ceid.timetable.repository.TeacherRepository;
@@ -12,6 +14,7 @@ import org.springframework.security.core.Authentication;
 import gr.upatras.ceid.timetable.service.TeacherImportService;
 import gr.upatras.ceid.timetable.solver.TeacherAvailabilityConstraints;
 import gr.upatras.ceid.timetable.solver.TeacherAvailabilityRegistry;
+import gr.upatras.ceid.timetable.util.TeacherDisplayText;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -25,6 +28,7 @@ public class TeacherController {
 
     private final TeacherRepository teacherRepo;
     private final CourseTeacherRepository courseTeacherRepo;
+    private final CourseRepository courseRepo;
     private final TeacherConstraintRepository constraintRepo;
     private final TeacherImportService teacherImportService;
     private final UserRepository userRepo;
@@ -32,16 +36,24 @@ public class TeacherController {
     public TeacherController(
             TeacherRepository teacherRepo,
             CourseTeacherRepository courseTeacherRepo,
+            CourseRepository courseRepo,
             TeacherConstraintRepository constraintRepo,
             TeacherImportService teacherImportService,
             UserRepository userRepo
     ) {
         this.teacherRepo = teacherRepo;
         this.courseTeacherRepo = courseTeacherRepo;
+        this.courseRepo = courseRepo;
         this.constraintRepo = constraintRepo;
         this.teacherImportService = teacherImportService;
         this.userRepo = userRepo;
     }
+
+    /**
+     * Structured αναφορά μαθήματος για το reverse M2M sync. Το {@code role}
+     * είναι προαιρετικό· null/blank → {@link CourseTeacher.Role#PRIMARY}.
+     */
+    public record CourseRef(Long courseId, String role) {}
 
     /**
      * Επιστρέφει true αν ο τρέχων χρήστης ΔΕΝ επιτρέπεται να επεξεργαστεί
@@ -166,6 +178,95 @@ public class TeacherController {
         }
         return ResponseEntity.ok(result);
     }
+
+    /**
+     * Reverse M2M sync: αντικαθιστά (replace-set) τα μαθήματα του διδάσκοντα από
+     * structured input (courseId + role) και αναπαράγει το {@code teachersText}
+     * ΚΑΘΕ επηρεαζόμενου μαθήματος — όσων προστέθηκαν ΚΑΙ όσων αφαιρέθηκαν (το
+     * string τους αλλάζει κι αυτών). Συμμετρικό του {@code CourseController.PUT
+     * /{id}/teachers}: το {@code course_teachers} M2M μένει η authoritative πηγή.
+     */
+    @PutMapping("/{id}/courses")
+    @Transactional
+    public ResponseEntity<?> setTeacherCourses(@PathVariable Long id,
+                                               @RequestBody List<CourseRef> body,
+                                               Authentication auth) {
+        Teacher teacher = teacherRepo.findById(id).orElse(null);
+        if (teacher == null) return ResponseEntity.notFound().build();
+        if (isForbiddenToEditTeacher(auth, id)) {
+            return ResponseEntity.status(403).build();
+        }
+
+        // desired set (courseId, role)· validate κάθε courseId + role
+        LinkedHashMap<RelationKey, Course> desired = new LinkedHashMap<>();
+        if (body != null) {
+            for (CourseRef ref : body) {
+                if (ref == null || ref.courseId() == null) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "error", "Απαιτείται courseId σε κάθε εγγραφή."));
+                }
+                CourseTeacher.Role role;
+                try {
+                    role = CourseController.parseRole(ref.role());
+                } catch (IllegalArgumentException ex) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "error", "Άγνωστος ρόλος διδάσκοντα: " + ref.role()));
+                }
+                Course course = courseRepo.findById(ref.courseId()).orElse(null);
+                if (course == null) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "error", "Δεν βρέθηκε μάθημα με id " + ref.courseId()));
+                }
+                desired.put(new RelationKey(ref.courseId(), role), course);
+            }
+        }
+
+        List<CourseTeacher> existing = courseTeacherRepo.findByTeacherId(id);
+        Set<Long> affectedCourseIds = new LinkedHashSet<>();
+
+        // delete όσα existing δεν είναι στο desired (το course τους θα ξανα-stamp-αριστεί)
+        for (CourseTeacher ct : existing) {
+            RelationKey key = new RelationKey(ct.getCourse().getId(), ct.getRole());
+            if (!desired.containsKey(key)) {
+                affectedCourseIds.add(ct.getCourse().getId());
+                courseTeacherRepo.delete(ct);
+            }
+        }
+
+        // insert όσα desired λείπουν (σεβασμός unique (course,teacher,role))
+        for (Map.Entry<RelationKey, Course> e : desired.entrySet()) {
+            RelationKey key = e.getKey();
+            if (!courseTeacherRepo.existsByCourseIdAndTeacherIdAndRole(key.id(), id, key.role())) {
+                affectedCourseIds.add(key.id());
+                courseTeacherRepo.save(CourseTeacher.builder()
+                        .course(e.getValue()).teacher(teacher).role(key.role()).build());
+            }
+        }
+
+        // regenerate teachersText για ΚΑΘΕ επηρεαζόμενο μάθημα (added ή removed)
+        for (Long courseId : affectedCourseIds) {
+            Course course = courseRepo.findById(courseId).orElse(null);
+            if (course == null) continue;
+            course.setTeachersText(
+                    TeacherDisplayText.buildTeachersText(courseTeacherRepo.findByCourseId(courseId)));
+            courseRepo.save(course);
+        }
+
+        // τελικά relations του διδάσκοντα ως [{courseId, courseCode, courseName, role}]
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (CourseTeacher ct : courseTeacherRepo.findByTeacherId(id)) {
+            Map<String, Object> dto = new LinkedHashMap<>();
+            dto.put("courseId",   ct.getCourse().getId());
+            dto.put("courseCode", ct.getCourse().getCode());
+            dto.put("courseName", ct.getCourse().getName());
+            dto.put("role",       ct.getRole() != null ? ct.getRole().name() : null);
+            result.add(dto);
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    /** Κλειδί ζεύγους (courseId, role) για diff/dedup των M2M σχέσεων. */
+    private record RelationKey(Long id, CourseTeacher.Role role) {}
 
     // ── DB Constraints (editable) ────────────────────────────────────────────
 
