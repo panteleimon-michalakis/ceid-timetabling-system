@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
-import { timetableService } from '../api/services';
+import { courseService, timetableService, teacherCourseService } from '../api/services';
+import DualListPicker from '../components/DualListPicker';
+import type { DualListSelection } from '../components/DualListPicker';
 import { generateIcal, downloadIcal } from '../utils/icalExport';
 import { useAuth } from '../context/AuthContext';
-import type { Teacher, Timetable, TimetableAssignment } from '../types';
+import type { Course, Teacher, Timetable, TimetableAssignment, TeacherCourseRef } from '../types';
+import { TEACHER_ROLES } from '../types';
 
 // ─── Local types ──────────────────────────────────────────────────────────────
-
-interface TeacherCourse {
-  courseId: number; courseCode: string; courseName: string;
-  semester?: number; studyYear?: number; role?: string | null;
-}
 
 interface DbConstraint {
   id?: number; dayOfWeek: string; hour: number;
@@ -57,7 +55,10 @@ export default function Teachers() {
 
   const [teachers,      setTeachers]      = useState<Teacher[]>([]);
   const [selectedId,    setSelectedId]    = useState<number | null>(null);
-  const [courses,       setCourses]       = useState<TeacherCourse[]>([]);
+  const [courses,       setCourses]       = useState<TeacherCourseRef[]>([]);
+  const [allCourses,    setAllCourses]    = useState<Course[]>([]);
+  const [courseSel,     setCourseSel]     = useState<DualListSelection[]>([]);
+  const [savingCourses, setSavingCourses] = useState(false);
   const [activeTab,     setActiveTab]     = useState<'info'|'courses'|'availability'|'schedule'>('info');
   const [loading,       setLoading]       = useState(true);
   const [allTimetables,       setAllTimetables]       = useState<Timetable[]>([]);
@@ -103,14 +104,20 @@ export default function Teachers() {
 
   // ── Load detail when teacher selected ─────────────────────────────────────
   useEffect(() => {
-    if (!selectedId) { setCourses([]); setCellMap(new Map()); setSavedMap(new Map()); return; }
+    if (!selectedId) {
+      setCourses([]); setCourseSel([]); setCellMap(new Map()); setSavedMap(new Map());
+      return;
+    }
     setLoadingDetail(true);
     setEditing(false);
     Promise.all([
-      api.get<TeacherCourse[]>(`/teachers/${selectedId}/courses`),
+      api.get<TeacherCourseRef[]>(`/teachers/${selectedId}/courses`),
       api.get<DbConstraint[]>(`/teachers/${selectedId}/constraints`),
-    ]).then(([cR, conR]) => {
+      courseService.getAll(),
+    ]).then(([cR, conR, allR]) => {
       setCourses(cR.data);
+      setCourseSel(cR.data.map(c => ({ id: c.courseId, role: c.role ?? 'SECONDARY' })));
+      setAllCourses(allR.data);
       const m = new Map<string, CellState>();
       for (const c of conR.data) {
         m.set(`${c.dayOfWeek}_${c.hour}`, c.constraintType as CellState);
@@ -207,6 +214,34 @@ export default function Teachers() {
   }
 
   function resetConstraints() { setCellMap(new Map(savedMap)); }
+
+  // ── Courses (M2M) picker ──────────────────────────────────────────────────
+  const coursesDirty = useMemo(() => {
+    const base = new Map<number, string>(
+      courses.map(c => [c.courseId, c.role ?? 'SECONDARY'] as [number, string])
+    );
+    if (base.size !== courseSel.length) return true;
+    for (const s of courseSel) { if (base.get(s.id) !== s.role) return true; }
+    return false;
+  }, [courses, courseSel]);
+
+  async function saveCourses() {
+    if (!selectedId) return;
+    setSavingCourses(true);
+    try {
+      await teacherCourseService.setForTeacher(
+        selectedId, courseSel.map(s => ({ courseId: s.id, role: s.role }))
+      );
+      // refetch-after-mutation: αντικατοπτρίζει το server-derived αλήθεια (ρόλοι/ordering).
+      const fresh = await teacherCourseService.getForTeacher(selectedId);
+      setCourses(fresh);
+      setCourseSel(fresh.map(c => ({ id: c.courseId, role: c.role ?? 'SECONDARY' })));
+    } finally { setSavingCourses(false); }
+  }
+
+  function resetCourses() {
+    setCourseSel(courses.map(c => ({ id: c.courseId, role: c.role ?? 'SECONDARY' })));
+  }
 
   // ── Styles ─────────────────────────────────────────────────────────────────
 
@@ -409,28 +444,24 @@ export default function Teachers() {
               </div>
             )}
 
-            {/* ── COURSES ── */}
+            {/* ── COURSES (editable M2M picker) ── */}
             {!loadingDetail && activeTab === 'courses' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {courses.length === 0 && <div style={{ color: '#334155', fontSize: '13px' }}>Δεν βρέθηκαν μαθήματα.</div>}
-                {courses.map(c => (
-                  <div key={c.courseId} style={{
-                    background: '#111e33', borderRadius: '8px', padding: '11px 14px',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  }}>
-                    <div>
-                      <div style={{ fontSize: '13px', fontWeight: 500 }}>{c.courseName}</div>
-                      <div style={{ fontSize: '11px', color: '#475569', fontFamily: 'JetBrains Mono, monospace', marginTop: '3px' }}>
-                        {c.courseCode} · Εξ.{c.semester} · {c.studyYear}ο έτος
-                      </div>
-                    </div>
-                    {c.role && (
-                      <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', background: '#1a2744', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
-                        {c.role}
-                      </span>
-                    )}
-                  </div>
-                ))}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
+                  {coursesDirty && <button onClick={resetCourses} style={btnSecondary}>Αναίρεση</button>}
+                  <button onClick={saveCourses} disabled={savingCourses || !coursesDirty}
+                    style={{ ...btnPrimary, opacity: coursesDirty ? 1 : 0.4 }}>
+                    {savingCourses ? 'Αποθήκευση...' : '✓ Αποθήκευση αλλαγών'}
+                  </button>
+                </div>
+                <DualListPicker
+                  available={allCourses.map(c => ({ id: c.id, label: c.code, sublabel: c.name }))}
+                  selected={courseSel}
+                  onChange={setCourseSel}
+                  roleOptions={TEACHER_ROLES}
+                  defaultRoleForNew={() => 'SECONDARY'}
+                  labels={{ availableTitle: 'Διαθέσιμα μαθήματα', selectedTitle: 'Ανατεθειμένα', emptySelected: 'Κανένα μάθημα' }}
+                />
               </div>
             )}
 

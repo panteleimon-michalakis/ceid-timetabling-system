@@ -62,6 +62,47 @@ export interface Course {
   notes?: string | null;
 }
 
+// --- Course ↔ Teacher M2M (Φ2b) ---
+
+export type TeacherRole =
+  | 'PRIMARY'
+  | 'SECONDARY'
+  | 'LAB_INSTRUCTOR'
+  | 'TUTORIAL_INSTRUCTOR';
+
+export const TEACHER_ROLES: TeacherRole[] = [
+  'PRIMARY', 'SECONDARY', 'LAB_INSTRUCTOR', 'TUTORIAL_INSTRUCTOR',
+];
+
+// UI labels (ελληνικά) — τα enum values μένουν αγγλικά για το backend
+export const TEACHER_ROLE_LABELS: Record<TeacherRole, string> = {
+  PRIMARY: 'Κύριος διδάσκων',
+  SECONDARY: 'Συνδιδάσκων',
+  LAB_INSTRUCTOR: 'Διδάσκων εργαστηρίου',
+  TUTORIAL_INSTRUCTOR: 'Διδάσκων φροντιστηρίου',
+};
+
+// GET /courses/{id}/teachers item
+export interface CourseTeacherRef {
+  teacherId: number;
+  teacherName: string;
+  role: TeacherRole;
+}
+
+// GET /teachers/{id}/courses item (αντικαθιστά το τοπικό interface στο Teachers.tsx)
+export interface TeacherCourseRef {
+  courseId: number;
+  courseCode: string;
+  courseName: string;
+  semester?: number;
+  studyYear?: number;
+  role?: TeacherRole;
+}
+
+// PUT bodies
+export interface CourseTeacherAssignment { teacherId: number; role: TeacherRole; }
+export interface TeacherCourseAssignment { courseId: number; role: TeacherRole; }
+
 export interface TimeSlot {
   id: number;
   dayOfWeek: string;

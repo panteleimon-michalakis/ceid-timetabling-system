@@ -2,6 +2,7 @@ import api from './client';
 import type {
   Room,
   Course,
+  Teacher,
   TimeSlot,
   Timetable,
   TimetableAssignment,
@@ -11,6 +12,10 @@ import type {
   SolverResult,
   GenerateExamSlotsRequest,
   GenerateExamSlotsResult,
+  CourseTeacherRef,
+  TeacherCourseRef,
+  CourseTeacherAssignment,
+  TeacherCourseAssignment,
 } from '../types';
 
 /** Δεσμευμένη ώρα αίθουσας (room_constraints). */
@@ -149,4 +154,27 @@ export const timetableService = {
 
 export const healthService = {
   check: () => api.get('/health'),
+};
+
+// ── Course ↔ Teacher M2M (Φ2b) ──────────────────────────────────────────
+
+/** Λίστα όλων των teachers — μόνο ό,τι χρειάζεται ο picker. */
+export const teacherService = {
+  getAll: () => api.get<Teacher[]>('/teachers').then(r => r.data),
+};
+
+/** Διδάσκοντες ανά μάθημα (course-side picker). */
+export const courseTeacherService = {
+  getForCourse: (courseId: number) =>
+    api.get<CourseTeacherRef[]>(`/courses/${courseId}/teachers`).then(r => r.data),
+  setForCourse: (courseId: number, body: CourseTeacherAssignment[]) =>
+    api.put<CourseTeacherRef[]>(`/courses/${courseId}/teachers`, body).then(r => r.data),
+};
+
+/** Μαθήματα ανά διδάσκοντα (teacher-side picker, reverse sync). */
+export const teacherCourseService = {
+  getForTeacher: (teacherId: number) =>
+    api.get<TeacherCourseRef[]>(`/teachers/${teacherId}/courses`).then(r => r.data),
+  setForTeacher: (teacherId: number, body: TeacherCourseAssignment[]) =>
+    api.put<TeacherCourseRef[]>(`/teachers/${teacherId}/courses`, body).then(r => r.data),
 };

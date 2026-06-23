@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { courseService } from '../api/services';
+import { courseService, courseTeacherService, teacherService } from '../api/services';
+import DualListPicker from '../components/DualListPicker';
+import type { DualListSelection } from '../components/DualListPicker';
 import { useAuth } from '../context/AuthContext';
-import type { Course } from '../types';
+import type { Course, Teacher } from '../types';
+import { TEACHER_ROLES } from '../types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -71,18 +74,61 @@ function CourseModal({ course, onClose, onSaved }: {
   const [form, setForm] = useState<Partial<Course>>(course ?? EMPTY_COURSE);
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
+  const [allTeachers, setAllTeachers] = useState<Teacher[]>([]);
+  const [teacherSel,  setTeacherSel]  = useState<DualListSelection[]>([]);
   const isNew = !form.id;
 
   const set = (k: keyof Course, v: unknown) => setForm(f => ({ ...f, [k]: v }));
+
+  // fetch-on-open: όλο το universe καθηγητών + (αν edit) η τρέχουσα M2M επιλογή.
+  useEffect(() => {
+    let cancelled = false;
+    teacherService.getAll()
+      .then(ts => { if (!cancelled) setAllTeachers(ts); })
+      .catch(() => {});
+    if (course?.id) {
+      courseTeacherService.getForCourse(course.id)
+        .then(refs => { if (!cancelled) setTeacherSel(refs.map(r => ({ id: r.teacherId, role: r.role }))); })
+        .catch(() => {});
+    } else {
+      setTeacherSel([]);
+    }
+    return () => { cancelled = true; };
+  }, [course?.id]);
 
   async function handleSave() {
     if (!form.code?.trim() || !form.name?.trim()) {
       setError('Κωδικός και Όνομα είναι υποχρεωτικά.'); return;
     }
     setSaving(true);
+    setError('');
+    // ΣΕΙΡΑ ΥΠΟΧΡΕΩΤΙΚΗ: το M2M PUT πάντα ΤΕΛΕΥΤΑΙΟ → η derived αναπαραγωγή του
+    // teachersText κερδίζει το (αμετάβλητο) payload του course update.
+    const m2mBody = teacherSel.map(s => ({ teacherId: s.id, role: s.role }));
     try {
-      if (isNew) await courseService.create(form as Course);
-      else        await courseService.update(form.id!, form as Course);
+      if (isNew) {
+        const res = await courseService.create(form as Course);
+        const newId = res.data.id;
+        // Μετέτρεψε το modal σε edit-state ώστε ένα retry να ΜΗΝ ξανα-δημιουργεί.
+        setForm(f => ({ ...f, id: newId }));
+        try {
+          await courseTeacherService.setForCourse(newId, m2mBody);
+        } catch {
+          onSaved();
+          setError('Το μάθημα δημιουργήθηκε, αλλά οι διδάσκοντες δεν αποθηκεύτηκαν — δοκίμασε ξανά.');
+          return;
+        }
+      } else {
+        // form.teachersText στέλνεται ΑΜΕΤΑΒΛΗΤΟ (derived· δεν επεξεργάζεται πια από τον χρήστη).
+        await courseService.update(form.id!, form as Course);
+        try {
+          await courseTeacherService.setForCourse(form.id!, m2mBody);
+        } catch {
+          onSaved();
+          setError('Το μάθημα ενημερώθηκε, αλλά οι διδάσκοντες δεν αποθηκεύτηκαν — δοκίμασε ξανά.');
+          return;
+        }
+      }
       onSaved();
       onClose();
     } catch (e: any) {
@@ -154,7 +200,20 @@ function CourseModal({ course, onClose, onSaved }: {
           </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Διδάσκοντες</label>
-            <input className="form-input" value={form.teachersText ?? ''} onChange={e => set('teachersText', e.target.value)} placeholder="π.χ. Κ. Βλάχος, Α. Παπαδόπουλος" />
+            <DualListPicker
+              available={allTeachers.map(t => ({ id: t.id, label: t.name, sublabel: t.shortName ?? t.department ?? '' }))}
+              selected={teacherSel}
+              onChange={setTeacherSel}
+              roleOptions={TEACHER_ROLES}
+              defaultRoleForNew={cur => (cur.length === 0 ? 'PRIMARY' : 'SECONDARY')}
+              warning={sel => {
+                const p = sel.filter(s => s.role === 'PRIMARY').length;
+                if (p === 0) return 'Προσοχή: το μάθημα δεν έχει κύριο διδάσκοντα.';
+                if (p > 1)  return 'Προσοχή: περισσότεροι από ένας κύριοι διδάσκοντες.';
+                return null;
+              }}
+              labels={{ availableTitle: 'Διαθέσιμοι καθηγητές', selectedTitle: 'Επιλεγμένοι', emptySelected: 'Κανένας διδάσκων' }}
+            />
           </div>
           <div className="form-group">
             <label className="form-label">Ενεργό</label>
