@@ -10,6 +10,11 @@ export function esc(s: unknown): string {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** Κωδικός μαθήματος όπως στο πρότυπο τμήματος: χωρίς το «CEID_» prefix (μόνο στις εκτυπώσεις). */
+export function shortCode(code?: string | null): string {
+  return String(code ?? '').replace(/^CEID[_\s-]?/i, '');
+}
+
 /** Χρώματα ανά έτος σπουδών (1ο…5ο) για τις εκτυπώσεις (πρώην `YC`). */
 export const YEAR_COLORS = ['#2563eb', '#059669', '#7c3aed', '#d97706', '#dc2626'];
 
@@ -117,4 +122,17 @@ export function groupItems<T>(
   return Array.from(map.entries())
     .sort((a, b) => a[1].sortKey.localeCompare(b[1].sortKey, 'el'))
     .map(([key, v]) => ({ key, title: v.title, items: v.items }));
+}
+
+// ─── Φ5c-3: seasonal electives split (Χειμερινού/Εαρινού/λοιπά) ──────────────
+
+/**
+ * Bucket «Μαθήματα Επιλογής» για μη-REQUIRED μάθημα, βάσει `course.semesterType`.
+ * sortKeys 97/98/99 → πάντα ΜΕΤΑ τα εξάμηνα (`sem-${n}`), με σειρά Χειμ→Εαρ→λοιπά.
+ * Κοινό σε weekly+exam ώστε keysOf↔printAvailable keys να ταιριάζουν πάντα.
+ */
+export function electiveBucket(semesterType?: string | null): { key: string; title: string; sortKey: string } {
+  if (semesterType === 'FALL')   return { key: 'electives-fall',   title: 'Μαθήματα Επιλογής Χειμερινού', sortKey: '97' };
+  if (semesterType === 'SPRING') return { key: 'electives-spring', title: 'Μαθήματα Επιλογής Εαρινού',     sortKey: '98' };
+  return { key: 'electives', title: 'Μαθήματα Επιλογής', sortKey: '99' };
 }

@@ -17,7 +17,7 @@ import TimetableSelector from '../components/TimetableSelector';
 import MoveAssignmentModal from '../components/MoveAssignmentModal';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 import ValidationIssuesModal from '../components/ValidationIssuesModal';
-import { esc, TYPE_COLORS, ALL_HOURS, yearColor, buildPrintDocument, openAndPrint, groupItems, parseTeachers, todayGreek } from '../utils/printTimetable';
+import { esc, shortCode, TYPE_COLORS, ALL_HOURS, yearColor, buildPrintDocument, openAndPrint, groupItems, parseTeachers, todayGreek, electiveBucket } from '../utils/printTimetable';
 import type { PrintGroupBy } from '../utils/printTimetable';
 import PrintOptionsModal from '../components/PrintOptionsModal';
 import type { PrintRequest } from '../components/PrintOptionsModal';
@@ -260,12 +260,13 @@ export default function WeeklyTimetable() {
     const semMap = new Map<string, string>();          // key `sem-${n}` (REQUIRED μόνο) → label
     const roomMap = new Map<string, string>();
     const teacherSet = new Set<string>();
-    let hasElectives = false;                            // ≥1 visible μη-REQUIRED → σελίδα «Επιλογής»
+    const electiveMap = new Map<string, { label: string; sortKey: string }>();  // buckets επιλογής (fall/spring/λοιπά)
     for (const a of visible) {
       if (a.course?.courseType === 'REQUIRED') {
         if (a.course.semester != null) semMap.set(`sem-${a.course.semester}`, `${a.course.semester}ο Εξάμηνο`);
       } else {
-        hasElectives = true;
+        const b = electiveBucket(a.course?.semesterType);
+        electiveMap.set(b.key, { label: b.title, sortKey: b.sortKey });
       }
       if (a.room?.id != null) roomMap.set(String(a.room.id), a.room.code);
       for (const name of parseTeachers(a.course?.teachersText)) teacherSet.add(name);
@@ -273,7 +274,10 @@ export default function WeeklyTimetable() {
     const semester = Array.from(semMap.entries())
       .sort((x, y) => Number(x[0].slice(4)) - Number(y[0].slice(4)))
       .map(([key, label]) => ({ key, label }));
-    if (hasElectives) semester.push({ key: 'electives', label: 'Μαθήματα Επιλογής' });  // πάντα τελευταίο
+    // Buckets επιλογής μετά τα εξάμηνα, με σειρά Χειμ→Εαρ→λοιπά (sortKey 97/98/99).
+    for (const [key, v] of Array.from(electiveMap.entries()).sort((x, y) => x[1].sortKey.localeCompare(y[1].sortKey))) {
+      semester.push({ key, label: v.label });
+    }
     return {
       semester,
       room: Array.from(roomMap.entries()).sort((x, y) => x[1].localeCompare(y[1], 'el')).map(([key, label]) => ({ key, label })),
@@ -947,11 +951,13 @@ async function runSolver() {
     function cellContent(a: TimetableAssignment): string {
       const type = a.assignmentType as string;
       const tc = TYPE_COLORS[type] ?? TYPE_COLORS.LECTURE;
-      const typeChip = req.showType ? ` <span style="font-size:6.5pt;color:${tc.border};font-weight:700;">${tc.label}</span>` : '';
+      const typeChip = req.showType ? ` <span style="color:${tc.border};font-weight:700;">${tc.label}</span>` : '';
       const semBadge = req.showSemesterBadge ? ` · Εξ.${esc(a.course.semester)}` : '';
-      return `<div style="font-size:8pt;line-height:1.25;">
-          <div style="font-weight:600;">${esc(a.course.code)}${typeChip} ${esc(a.course.name)}</div>
-          <div style="font-size:7pt;color:#475569;margin-top:2px;">${esc(a.room?.code ?? '')}${semBadge}</div>
+      // Κωδικός (χωρίς CEID_, μία γραμμή nowrap) & όνομα (ήπιο wrap) σε ΞΕΧΩΡΙΣΤΕΣ γραμμές.
+      return `<div style="font-size:8pt;line-height:1.2;overflow-wrap:break-word;">
+          <div style="font-weight:700;white-space:nowrap;">${esc(shortCode(a.course.code))}${typeChip}</div>
+          <div style="margin-top:1px;">${esc(a.course.name)}</div>
+          <div style="font-size:6.5pt;color:#475569;margin-top:2px;">${esc(a.room?.code ?? '')}${semBadge}</div>
         </div>`;
     }
 
@@ -1019,7 +1025,8 @@ async function runSolver() {
           const key = `sem-${a.course.semester}`;
           return selected.has(key) ? [{ key, title: `${a.course.semester}ο Εξάμηνο`, sortKey: String(a.course.semester).padStart(2, '0') }] : [];
         }
-        return selected.has('electives') ? [{ key: 'electives', title: 'Μαθήματα Επιλογής', sortKey: '99' }] : [];
+        const b = electiveBucket(a.course.semesterType);  // Χειμερινού/Εαρινού/λοιπά
+        return selected.has(b.key) ? [b] : [];
       }
       if (req.groupBy === 'room') {
         if (!a.room || !selected.has(String(a.room.id))) return [];

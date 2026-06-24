@@ -9,7 +9,7 @@ import type {
 import TimetableSelector from '../components/TimetableSelector';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 import ValidationIssuesModal from '../components/ValidationIssuesModal';
-import { esc, ALL_HOURS, yearColor, buildPrintDocument, openAndPrint, groupItems, parseTeachers } from '../utils/printTimetable';
+import { esc, shortCode, yearColor, todayGreek, buildPrintDocument, openAndPrint, groupItems, parseTeachers, electiveBucket } from '../utils/printTimetable';
 import type { PrintGroupBy } from '../utils/printTimetable';
 import PrintOptionsModal from '../components/PrintOptionsModal';
 import type { PrintRequest } from '../components/PrintOptionsModal';
@@ -326,16 +326,29 @@ export default function ExamTimetable() {
   // Διαθέσιμες οντότητες ανά διάσταση ομαδοποίησης (από τα τρέχοντα visible assignments).
   const printAvailable = useMemo<Record<PrintGroupBy, { key: string; label: string }[]>>(() => {
     const visible = assignments.filter((a) => a.course?.visibleInTimetable !== false);
-    const semMap = new Map<string, string>();
+    const semMap = new Map<string, string>();          // key `sem-${n}` (REQUIRED μόνο) → label
     const roomMap = new Map<string, string>();
     const teacherSet = new Set<string>();
+    const electiveMap = new Map<string, { label: string; sortKey: string }>();  // buckets επιλογής (fall/spring/λοιπά)
     for (const a of visible) {
-      if (a.course?.semester != null) semMap.set(String(a.course.semester), `${a.course.semester}ο Εξάμηνο`);
+      if (a.course?.courseType === 'REQUIRED') {
+        if (a.course.semester != null) semMap.set(`sem-${a.course.semester}`, `${a.course.semester}ο Εξάμηνο`);
+      } else {
+        const b = electiveBucket(a.course?.semesterType);
+        electiveMap.set(b.key, { label: b.title, sortKey: b.sortKey });
+      }
       if (a.room?.id != null) roomMap.set(String(a.room.id), a.room.code);
       for (const name of parseTeachers(a.course?.teachersText)) teacherSet.add(name);
     }
+    const semester = Array.from(semMap.entries())
+      .sort((x, y) => Number(x[0].slice(4)) - Number(y[0].slice(4)))
+      .map(([key, label]) => ({ key, label }));
+    // Buckets επιλογής μετά τα εξάμηνα, με σειρά Χειμ→Εαρ→λοιπά (sortKey 97/98/99).
+    for (const [key, v] of Array.from(electiveMap.entries()).sort((x, y) => x[1].sortKey.localeCompare(y[1].sortKey))) {
+      semester.push({ key, label: v.label });
+    }
     return {
-      semester: Array.from(semMap.entries()).sort((x, y) => Number(x[0]) - Number(y[0])).map(([key, label]) => ({ key, label })),
+      semester,
       room: Array.from(roomMap.entries()).sort((x, y) => x[1].localeCompare(y[1], 'el')).map(([key, label]) => ({ key, label })),
       teacher: Array.from(teacherSet).sort((x, y) => x.localeCompare(y, 'el')).map((name) => ({ key: name, label: name })),
     };
@@ -591,69 +604,114 @@ export default function ExamTimetable() {
     const globalDates = examDates.filter(d => assignedDates.has(d));
     if (globalDates.length === 0) { alert('Δεν υπάρχουν τοποθετημένες εξετάσεις.'); return; }
 
-    function fmtDate(d: string): string {
-      try { const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('el-GR', { weekday: 'short', day: 'numeric', month: 'numeric' }); }
-      catch { return d; }
+    const fmtDM = (d: string): string => {
+      const dt = new Date(d + 'T00:00:00');
+      return `${dt.getDate()}/${dt.getMonth() + 1}`;
+    };
+    // Διγράμματα ημερών μόνο για το print header (ξεκάθαρα Τρ/Τε, Πε/Πα — αντί διφορούμενα μονά γράμματα).
+    const DAY2 = ['Κυ', 'Δε', 'Τρ', 'Τε', 'Πε', 'Πα', 'Σα']; // Date.getDay(): 0=Κυρ … 6=Σαβ
+    const day2Of = (d: string): string => DAY2[new Date(d + 'T00:00:00').getDay()] ?? '';
+    const durHours = (a: TimetableAssignment): number => Math.max(1, Math.round((a.examDurationMinutes ?? 180) / 60));
+
+    // Εβδομάδες ως column-groups — από ΟΛΑ τα visible exam dates (global) → σταθερές στήλες/εβδομάδες
+    // σε κάθε σελίδα-group. Boundary νέας εβδομάδας = weekStartDates (gap ≥ 2 ημερών).
+    type Week = { label: string; dates: string[] };
+    const weeks: Week[] = [];
+    for (const d of globalDates) {
+      if (weeks.length === 0 || weekStartDates.has(d)) weeks.push({ label: '', dates: [d] });
+      else weeks[weeks.length - 1].dates.push(d);
     }
-    // Κελί μιας εξέτασης — τιμά colorByYear / showSemesterBadge (δεν υπάρχει type chip).
-    function buildCell(a: TimetableAssignment): string {
-      const yc = yearColor(a.course.studyYear);
-      const dur = a.examDurationMinutes ? `${a.examDurationMinutes / 60}h` : '3h';
-      const border = req.colorByYear ? yc : '#cbd5e1';
-      const stripe = req.colorByYear ? `border-left:3px solid ${yc};` : '';
-      const codeColor = req.colorByYear ? yc : '#334155';
+    weeks.forEach(w => { w.label = `${fmtDM(w.dates[0])}-${fmtDM(w.dates[w.dates.length - 1])}`; });
+    const allDates = weeks.flatMap(w => w.dates);
+    const allDateSet = new Set(allDates);
+
+    // rowHours: συνεχόμενο εύρος min..max που καλύπτει ΟΛΕΣ τις ώρες-διάρκειες (start..start+dur-1),
+    // ώστε το duration-rowspan να μη γεφυρώνει χάσμα και να χωράνε όλες οι καλυπτόμενες ώρες.
+    const occupied = new Set<number>();
+    for (const a of printable) {
+      const date = a.timeSlot?.specificDate;
+      if (!date || !allDateSet.has(date)) continue;
+      const sh = parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '', 10);
+      if (Number.isNaN(sh)) continue;
+      for (let k = 0; k < durHours(a); k++) occupied.add(sh + k);
+    }
+    if (occupied.size === 0) { alert('Δεν υπάρχουν τοποθετημένες εξετάσεις.'); return; }
+    const minH = Math.min(...occupied);
+    const maxH = Math.max(...occupied);
+    const rowHours: number[] = [];
+    for (let h = minH; h <= maxH; h++) rowHours.push(h);
+
+    const tdBase = 'border:1px solid #cbd5e1;padding:2px 3px;vertical-align:top;';
+
+    // Περιεχόμενο κελιού (aSc, πυκνό 20-στηλο): κωδικός & όνομα σε ΞΕΧΩΡΙΣΤΕΣ γραμμές + wrap →
+    // κείμενο μένει μέσα στο κελί (fix overflow). Τιμά showSemesterBadge.
+    function cellContent(a: TimetableAssignment, dur: number): string {
       const semBadge = req.showSemesterBadge ? ` · Εξ.${esc(a.course.semester)}` : '';
-      return `<div style="background:#f8fafc;border:1px solid ${border};${stripe}border-radius:4px;padding:4px 6px;margin-bottom:3px;">
-          <div style="font-weight:700;color:${codeColor};font-family:monospace;font-size:7.5pt;">${esc(a.course.code)}</div>
-          <div style="font-size:8pt;font-weight:500;line-height:1.3;">${esc(a.course.name)}</div>
-          <div style="font-size:7pt;color:#64748b;">${esc(a.room?.code ?? '')} · ${dur}${semBadge}</div>
+      return `<div style="font-size:7pt;line-height:1.2;overflow-wrap:break-word;">
+          <div style="font-weight:700;white-space:nowrap;">${esc(shortCode(a.course.code))}</div>
+          <div style="margin-top:1px;">${esc(a.course.name)}</div>
+          <div style="font-size:6.5pt;color:#475569;margin-top:2px;">${esc(a.room?.code ?? '')} · ${dur}h${semBadge}</div>
         </div>`;
     }
-    // Grid (dates×hours, chunk-by-8) για ένα υποσύνολο. Per-group dates/hours → compact σελίδες.
+
+    // 4-εβδομάδων grid με duration-rowspan: κάθε εξέταση πιάνει examDurationMinutes/60 διαδοχικές γραμμές.
     function buildExamGrid(items: TimetableAssignment[]): string {
-      const dates = globalDates.filter(d => items.some(a => a.timeSlot?.specificDate === d));
-      if (dates.length === 0) return '';
-      const hours = ALL_HOURS.filter(hour =>
-        dates.some(date => items.some(a =>
-          a.timeSlot?.specificDate === date &&
-          parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '0') === parseInt(hour)
-        ))
-      );
-      const cell = (date: string, hour: string): string => {
-        const h = parseInt(hour);
-        return items
-          .filter(a => a.timeSlot?.specificDate === date && parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '0') === h)
-          .map(buildCell).join('');
-      };
-      const CHUNK = 8;
-      const chunks: string[][] = [];
-      for (let i = 0; i < dates.length; i += CHUNK) chunks.push(dates.slice(i, i + CHUNK));
-      const thStyle = `padding:6px 4px;background:#1e40af;color:white;text-align:center;font-size:8.5pt;min-width:110px;border:1px solid #3b82f6;`;
-      return chunks.map((chunk, ci) => `
-      <div style="${ci < chunks.length - 1 ? 'page-break-after:always;' : ''}">
-        <table><thead><tr>
-          <th style="padding:6px 8px;background:#1e40af;color:white;font-size:8.5pt;border:1px solid #3b82f6;min-width:50px;">Ώρα</th>
-          ${chunk.map(d=>`<th style="${thStyle}">${fmtDate(d)}<div style="font-size:7pt;opacity:0.75;">${d}</div></th>`).join('')}
-        </tr></thead><tbody>
-          ${hours.map(hour=>`<tr>
-            <td style="padding:4px 6px;font-weight:600;font-family:monospace;font-size:8.5pt;background:#f1f5f9;border:1px solid #e2e8f0;white-space:nowrap;">${hour}</td>
-            ${chunk.map(date=>`<td style="padding:3px;vertical-align:top;border:1px solid #e2e8f0;min-width:110px;">${cell(date,hour)}</td>`).join('')}
-          </tr>`).join('')}
-        </tbody></table>
-      </div>`).join('');
+      if (!items.some(a => a.timeSlot?.specificDate && allDateSet.has(a.timeSlot.specificDate))) return '';
+      const covered = new Map<string, Set<number>>();
+      allDates.forEach(d => covered.set(d, new Set<number>()));
+      const cellOf = (date: string, hourInt: number) =>
+        items.filter(a => a.timeSlot?.specificDate === date && parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '', 10) === hourInt);
+
+      const rows = rowHours.map(hourInt => {
+        const tds = allDates.map(date => {
+          const cov = covered.get(date)!;
+          if (cov.has(hourInt)) return ''; // καλυμμένο από rowspan από πάνω → χωρίς <td>
+          const cellItems = cellOf(date, hourInt);
+          if (cellItems.length === 1) {
+            const a = cellItems[0];
+            const dur = durHours(a);
+            const run = Math.min(dur, maxH - hourInt + 1); // μην ξεπερνάς το τέλος του grid
+            for (let k = 1; k < run; k++) cov.add(hourInt + k);
+            const stripe = req.colorByYear ? `border-left:3px solid ${yearColor(a.course.studyYear)};` : '';
+            const rs = run > 1 ? ` rowspan="${run}"` : '';
+            return `<td${rs} style="${tdBase}${stripe}">${cellContent(a, dur)}</td>`;
+          }
+          if (cellItems.length === 0) return `<td style="${tdBase}"></td>`;
+          // Παράλληλες εξετάσεις ίδιο date+hour → stacked, rowspan 1 (degrade gracefully).
+          const stacked = cellItems.map(a => `<div style="margin-bottom:3px;">${cellContent(a, durHours(a))}</div>`).join('');
+          return `<td style="${tdBase}">${stacked}</td>`;
+        }).join('');
+        return `<tr><td style="${tdBase}background:#f8fafc;font-size:7pt;color:#475569;white-space:nowrap;text-align:center;">${hourInt}-${hourInt + 1}</td>${tds}</tr>`;
+      }).join('');
+
+      const headTh = 'border:1px solid #cbd5e1;background:#f1f5f9;color:#0f172a;font-weight:600;padding:3px 4px;text-align:center;';
+      // Two-level header: πάνω = ετικέτες εβδομάδων (colspan)· κάτω = ημερομηνίες (γράμμα ημέρας + d/m).
+      const header = `<tr>
+        <th rowspan="2" style="${headTh}font-size:7pt;width:42px;">Ώρα</th>
+        ${weeks.map(w => `<th colspan="${w.dates.length}" style="${headTh}font-size:7pt;">${esc(w.label)}</th>`).join('')}
+      </tr>
+      <tr>
+        ${allDates.map(d => `<th style="${headTh}font-size:7pt;font-weight:500;">${day2Of(d)} ${fmtDM(d)}</th>`).join('')}
+      </tr>`;
+
+      return `
+      <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+        <thead>${header}</thead>
+        <tbody>${rows}</tbody>
+      </table>`;
     }
 
-    const yearLegend = req.colorByYear
-      ? ['1ο Έτος','2ο Έτος','3ο Έτος','4ο Έτος','5ο Έτος'].map((y,i)=>`<div class="ld"><div class="ldot" style="background:${yearColor(i+1)}"></div>${y}</div>`).join('')
-      : '';
-    const legendHtml = yearLegend ? `<div class="legend">${yearLegend}</div>` : '';
-
     // Ομαδοποίηση: keys μόνο για το req.groupBy, φιλτραρισμένα στα req.selectedKeys.
+    // Στο semester mode: REQUIRED → ανά εξάμηνο· υπόλοιπα → ΜΙΑ σελίδα «Μαθήματα Επιλογής» (τελευταία).
     const selected = new Set(req.selectedKeys);
     const keysOf = (a: TimetableAssignment): { key: string; title: string; sortKey: string }[] => {
       if (req.groupBy === 'semester') {
-        const key = String(a.course.semester);
-        return selected.has(key) ? [{ key, title: `${a.course.semester}ο Εξάμηνο`, sortKey: key.padStart(2, '0') }] : [];
+        if (a.course.courseType === 'REQUIRED') {
+          const key = `sem-${a.course.semester}`;
+          return selected.has(key) ? [{ key, title: `${a.course.semester}ο Εξάμηνο`, sortKey: String(a.course.semester).padStart(2, '0') }] : [];
+        }
+        const b = electiveBucket(a.course.semesterType);  // Χειμερινού/Εαρινού/λοιπά
+        return selected.has(b.key) ? [b] : [];
       }
       if (req.groupBy === 'room') {
         if (!a.room || !selected.has(String(a.room.id))) return [];
@@ -668,15 +726,20 @@ export default function ExamTimetable() {
     const renderable = groups.map(g => ({ g, html: buildExamGrid(g.items) })).filter(x => x.html);
     if (renderable.length === 0) { alert('Δεν υπάρχουν τοποθετημένες εξετάσεις.'); return; }
 
-    // Μία οντότητα ανά σελίδα (page-break-after εκτός της τελευταίας).
-    const bodyHtml = renderable.map(({ g, html }, idx) => `
+    // Μία οντότητα ανά σελίδα (aSc-style: κεντρικός τίτλος, καθαρό grid, footer).
+    const bodyHtml = renderable.map(({ g, html }, idx) => {
+      const years = req.colorByYear ? Array.from(new Set(g.items.map(a => a.course.studyYear))).sort((x, y) => x - y) : [];
+      const legend = years.length
+        ? `<div style="display:flex;gap:12px;justify-content:center;font-size:7pt;color:#64748b;margin-top:6px;">${years.map(y => `<span style="display:inline-flex;align-items:center;gap:3px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${yearColor(y)};"></span>${y}ο Έτος</span>`).join('')}</div>`
+        : '';
+      return `
       <div style="${idx < renderable.length - 1 ? 'page-break-after:always;' : ''}">
-        <div class="hdr">
-          <h1>${esc(g.title)}</h1>
-          <p>Εξεταστική Περίοδος — ${esc(tt.name)} &nbsp;·&nbsp; ΤΜΗΥΠ · Πανεπιστήμιο Πατρών</p>
-          ${legendHtml}
-        </div>${html}
-      </div>`).join('');
+        <div style="text-align:center;font-size:18pt;font-weight:400;margin:4px 0 2px;">${esc(g.title)}</div>
+        <div style="text-align:center;font-size:8pt;color:#64748b;margin-bottom:8px;">Εξεταστική Περίοδος — ${esc(tt.name)} · ΤΜΗΥΠ Πανεπιστήμιο Πατρών</div>
+        ${html}${legend}
+        <div style="font-size:7pt;color:#94a3b8;margin-top:6px;">Δημιουργία Προγράμματος: ${todayGreek()}</div>
+      </div>`;
+    }).join('');
 
     const html = buildPrintDocument({
       title: `Εξεταστική — ${tt.name}`,
