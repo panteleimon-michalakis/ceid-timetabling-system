@@ -68,6 +68,14 @@ export function buildPrintDocument(opts: PrintDocumentOptions): string {
       </style></head><body><div class="hint">⚠️ Για σωστή εκτύπωση: στο πεδίο <strong>Προορισμός</strong> επίλεξε <strong>"Αποθήκευση ως PDF"</strong> (όχι Microsoft Print to PDF) — ή επίλεξε <strong>Διάταξη → Οριζόντιος</strong>.</div>${headerHtml}${bodyHtml}</body></html>`;
 }
 
+/** Σημερινή ημερομηνία ως `dd/mm/yyyy` (footer εκτυπώσεων, aSc-style πρότυπο). */
+export function todayGreek(): string {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
 /** Άνοιγμα νέου παραθύρου + εκτύπωση (ίδιο boilerplate με πριν). */
 export function openAndPrint(html: string): void {
   const win = window.open('', '_blank', 'width=1200,height=800');
