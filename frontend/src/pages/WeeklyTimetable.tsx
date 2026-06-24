@@ -17,6 +17,7 @@ import TimetableSelector from '../components/TimetableSelector';
 import MoveAssignmentModal from '../components/MoveAssignmentModal';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 import ValidationIssuesModal from '../components/ValidationIssuesModal';
+import { esc, YEAR_COLORS, TYPE_COLORS, ALL_HOURS, yearColor, buildPrintDocument, openAndPrint } from '../utils/printTimetable';
 
 const DAYS = [
   { key: 'MONDAY', label: 'Δευτέρα' },
@@ -888,23 +889,15 @@ async function runSolver() {
 
   function printWeeklyTimetable() {
     if (!selectedTimetable || assignments.length === 0) return;
-    const esc = (s: any) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     // Μαθήματα «σε συνεννόηση» δεν τυπώνονται στο επίσημο πρόγραμμα.
     const printableAssignments = assignments.filter(a => a.course?.visibleInTimetable !== false);
-    const YC = ['#2563eb','#059669','#7c3aed','#d97706','#dc2626'];
-    const TC: Record<string,{bg:string;border:string;label:string}> = {
-      LECTURE:  { bg:'#eff6ff', border:'#2563eb', label:'Θ' },
-      TUTORIAL: { bg:'#f0fdf4', border:'#16a34a', label:'Φ' },
-      LAB:      { bg:'#fffbeb', border:'#d97706', label:'Ε' },
-    };
     const DAYS_ALL = [
       {key:'MONDAY',label:'Δευτέρα'},{key:'TUESDAY',label:'Τρίτη'},
       {key:'WEDNESDAY',label:'Τετάρτη'},{key:'THURSDAY',label:'Πέμπτη'},
       {key:'FRIDAY',label:'Παρασκευή'},
     ];
-    const HOURS_ALL = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00'];
     const activeDays = DAYS_ALL.filter(d => assignments.some(a => a.timeSlot?.dayOfWeek === d.key));
-    const activeHours = HOURS_ALL.filter(h =>
+    const activeHours = ALL_HOURS.filter(h =>
       activeDays.some(d => assignments.some(a =>
         a.timeSlot?.dayOfWeek === d.key && a.timeSlot?.startTime?.startsWith(h.slice(0,2))
       ))
@@ -917,8 +910,8 @@ async function runSolver() {
       if (!items.length) return '';
       return items.map((a:any) => {
         const type = a.assignmentType as string;
-        const tc = TC[type] ?? TC.LECTURE;
-        const yc = YC[(a.course.studyYear ?? 1) - 1] ?? '#2563eb';
+        const tc = TYPE_COLORS[type] ?? TYPE_COLORS.LECTURE;
+        const yc = yearColor(a.course.studyYear);
         return `<div style="background:${tc.bg};border:1px solid ${tc.border};border-left:3px solid ${yc};border-radius:4px;padding:4px 6px;margin-bottom:3px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
             <span style="font-weight:700;color:${yc};font-family:monospace;font-size:7.5pt;">${esc(a.course.code)}</span>
@@ -932,23 +925,7 @@ async function runSolver() {
     const semType = (selectedTimetable as any).semesterType === 'FALL' ? 'Χειμερινό'
                   : (selectedTimetable as any).semesterType === 'SPRING' ? 'Εαρινό' : '';
     const thS = 'padding:8px 6px;background:#1e40af;color:white;text-align:center;font-size:9pt;border:1px solid #3b82f6;min-width:140px;';
-    const html = `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
-      <title>Ωρολόγιο — ${esc((selectedTimetable as any).name)}</title>
-      <style>
-        *{box-sizing:border-box;margin:0;padding:0;}
-        body{font-family:Arial,sans-serif;font-size:9pt;}
-        @page{size:297mm 210mm;margin:8mm;}
-        @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
-        table{border-collapse:collapse;width:100%;}
-        .hdr{margin-bottom:8px;border-bottom:2px solid #1e40af;padding-bottom:5px;}
-        .hdr h1{font-size:13pt;color:#1e40af;} .hdr p{font-size:8pt;color:#64748b;}
-        .legend{display:flex;gap:12px;margin-top:5px;font-size:7.5pt;flex-wrap:wrap;}
-        .ld{display:flex;align-items:center;gap:3px;}
-        .ldot{width:9px;height:9px;border-radius:2px;}
-        @media screen{.hint{background:#fef3c7;border:1px solid #d97706;border-radius:4px;padding:8px 14px;margin-bottom:10px;font-size:10pt;}}
-        @media print{.hint{display:none!important;}}
-      </style></head><body>
-      <div class="hint">⚠️ Για σωστή εκτύπωση: στο πεδίο <strong>Προορισμός</strong> επίλεξε <strong>"Αποθήκευση ως PDF"</strong> (όχι Microsoft Print to PDF) — ή επίλεξε <strong>Διάταξη → Οριζόντιος</strong>.</div>
+    const headerHtml = `
       <div class="hdr">
         <h1>Ωρολόγιο Πρόγραμμα — ${esc((selectedTimetable as any).name)}</h1>
         <p>ΤΜΗΥΠ · Πανεπιστήμιο Πατρών${semType ? ` · ${semType} Εξάμηνο` : ''} · ${esc((selectedTimetable as any).academicYear ?? '')}</p>
@@ -957,10 +934,11 @@ async function runSolver() {
             .map(x=>`<div class="ld"><div class="ldot" style="background:${x.c};"></div>${x.l}</div>`).join('')}
           &nbsp;&nbsp;
           ${['1ο','2ο','3ο','4ο','5ο'].map((y,i)=>
-            `<div class="ld"><div class="ldot" style="background:${YC[i]};border-radius:50%;"></div>${y} Έτος</div>`
+            `<div class="ld"><div class="ldot" style="background:${YEAR_COLORS[i]};border-radius:50%;"></div>${y} Έτος</div>`
           ).join('')}
         </div>
-      </div>
+      </div>`;
+    const bodyHtml = `
       <table><thead><tr>
         <th style="padding:6px 8px;background:#1e40af;color:white;font-size:8.5pt;border:1px solid #3b82f6;min-width:50px;">Ώρα</th>
         ${activeDays.map(d=>`<th style="${thS}">${d.label}</th>`).join('')}
@@ -969,10 +947,13 @@ async function runSolver() {
           <td style="padding:4px 6px;font-weight:600;font-family:monospace;font-size:8.5pt;background:#f1f5f9;border:1px solid #e2e8f0;white-space:nowrap;">${hour}</td>
           ${activeDays.map(d=>`<td style="padding:3px;vertical-align:top;border:1px solid #e2e8f0;">${getCell(d.key,hour)}</td>`).join('')}
         </tr>`).join('')}
-      </tbody></table></body></html>`;
-    const win = window.open('', '_blank', 'width=1200,height=800');
-    if (!win) { alert('Επέτρεψε τα pop-ups του browser για εκτύπωση.'); return; }
-    win.document.write(html); win.document.close(); win.onload = () => win.print();
+      </tbody></table>`;
+    const html = buildPrintDocument({
+      title: `Ωρολόγιο — ${(selectedTimetable as any).name}`,
+      headerHtml,
+      bodyHtml,
+    });
+    openAndPrint(html);
   }
 
   return (

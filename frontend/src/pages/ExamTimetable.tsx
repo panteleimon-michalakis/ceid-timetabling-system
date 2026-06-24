@@ -9,6 +9,7 @@ import type {
 import TimetableSelector from '../components/TimetableSelector';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 import ValidationIssuesModal from '../components/ValidationIssuesModal';
+import { esc, ALL_HOURS, yearColor, buildPrintDocument, openAndPrint } from '../utils/printTimetable';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -559,16 +560,13 @@ export default function ExamTimetable() {
 
   function printExamSchedule() {
     if (!selectedTimetable) return;
-    const esc = (s: any) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     // Μαθήματα «σε συνεννόηση» δεν τυπώνονται στο επίσημο πρόγραμμα.
     const printableAssignments = assignments.filter(a => a.course?.visibleInTimetable !== false);
-    const YC = ['#2563eb','#059669','#7c3aed','#d97706','#dc2626'];
     const assignedDates = new Set(
       printableAssignments.map(a => a.timeSlot?.specificDate).filter(Boolean) as string[]
     );
     const printDates = examDates.filter(d => assignedDates.has(d));
     if (printDates.length === 0) { alert('Δεν υπάρχουν τοποθετημένες εξετάσεις.'); return; }
-    const ALL_HOURS = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00'];
     const activeHours = ALL_HOURS.filter(hour =>
       printDates.some(date =>
         assignments.some(a =>
@@ -589,7 +587,7 @@ export default function ExamTimetable() {
       );
       if (!items.length) return '';
       return items.map(a => {
-        const yc = YC[(a.course.studyYear ?? 1) - 1] ?? '#2563eb';
+        const yc = yearColor(a.course.studyYear);
         const dur = a.examDurationMinutes ? `${a.examDurationMinutes / 60}h` : '3h';
         return `<div style="background:#f8fafc;border:1px solid ${yc};border-left:3px solid ${yc};border-radius:4px;padding:4px 6px;margin-bottom:3px;">
           <div style="font-weight:700;color:${yc};font-family:monospace;font-size:7.5pt;">${esc(a.course.code)}</div>
@@ -602,7 +600,7 @@ export default function ExamTimetable() {
     const chunks: string[][] = [];
     for (let i = 0; i < printDates.length; i += CHUNK) chunks.push(printDates.slice(i, i + CHUNK));
     const thStyle = `padding:6px 4px;background:#1e40af;color:white;text-align:center;font-size:8.5pt;min-width:110px;border:1px solid #3b82f6;`;
-    const legend = ['1ο Έτος','2ο Έτος','3ο Έτος','4ο Έτος','5ο Έτος'].map((y,i)=>`<div class="ld"><div class="ldot" style="background:${YC[i]}"></div>${y}</div>`).join('');
+    const legend = ['1ο Έτος','2ο Έτος','3ο Έτος','4ο Έτος','5ο Έτος'].map((y,i)=>`<div class="ld"><div class="ldot" style="background:${yearColor(i+1)}"></div>${y}</div>`).join('');
     const tables = chunks.map((chunk, idx) => `
       <div style="${idx < chunks.length - 1 ? 'page-break-after:always;' : ''}">
         <div class="hdr">
@@ -620,27 +618,15 @@ export default function ExamTimetable() {
           </tr>`).join('')}
         </tbody></table>
       </div>`).join('');
-    const html = `<!DOCTYPE html><html lang="el"><head><meta charset="UTF-8">
-      <title>Εξεταστική — ${esc(selectedTimetable.name)}</title>
-      <style>
-        *{box-sizing:border-box;margin:0;padding:0;}
-        body{font-family:Arial,sans-serif;font-size:9pt;}
-        @page{size:297mm 210mm;margin:8mm;}
-        @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
-        table{border-collapse:collapse;width:100%;}
-        .hdr{margin-bottom:8px;border-bottom:2px solid #1e40af;padding-bottom:5px;}
-        .hdr h1{font-size:12pt;color:#1e40af;} .hdr p{font-size:8pt;color:#64748b;}
-        .legend{display:flex;gap:10px;margin-top:5px;font-size:7.5pt;}
-        .ld{display:flex;align-items:center;gap:3px;}
-        .ldot{width:9px;height:9px;border-radius:2px;}
-        @media screen{.hint{background:#fef3c7;border:1px solid #d97706;border-radius:4px;padding:8px 14px;margin-bottom:10px;font-size:10pt;}}
-        @media print{.hint{display:none!important;}}
-      </style></head><body><div class="hint">⚠️ Για σωστή εκτύπωση: στο πεδίο <strong>Προορισμός</strong> επίλεξε <strong>"Αποθήκευση ως PDF"</strong> (όχι Microsoft Print to PDF) — ή επίλεξε <strong>Διάταξη → Οριζόντιος</strong>.</div>${tables}</body></html>`;
-    const win = window.open('', '_blank', 'width=1200,height=800');
-    if (!win) { alert('Επέτρεψε τα pop-ups του browser για εκτύπωση.'); return; }
-    win.document.write(html);
-    win.document.close();
-    win.onload = () => win.print();
+    const html = buildPrintDocument({
+      title: `Εξεταστική — ${selectedTimetable.name}`,
+      headerHtml: '',
+      bodyHtml: tables,
+      h1FontSizePt: 12,
+      legendGapPx: 10,
+      legendWrap: false,
+    });
+    openAndPrint(html);
   }
 
   // ─── Render ─────────────────────────────────────────────────────────────────
