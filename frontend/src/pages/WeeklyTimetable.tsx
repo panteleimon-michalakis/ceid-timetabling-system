@@ -17,7 +17,10 @@ import TimetableSelector from '../components/TimetableSelector';
 import MoveAssignmentModal from '../components/MoveAssignmentModal';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 import ValidationIssuesModal from '../components/ValidationIssuesModal';
-import { esc, YEAR_COLORS, TYPE_COLORS, ALL_HOURS, yearColor, buildPrintDocument, openAndPrint } from '../utils/printTimetable';
+import { esc, YEAR_COLORS, TYPE_COLORS, ALL_HOURS, yearColor, buildPrintDocument, openAndPrint, groupItems, parseTeachers } from '../utils/printTimetable';
+import type { PrintGroupBy } from '../utils/printTimetable';
+import PrintOptionsModal from '../components/PrintOptionsModal';
+import type { PrintRequest } from '../components/PrintOptionsModal';
 
 const DAYS = [
   { key: 'MONDAY', label: 'Δευτέρα' },
@@ -226,6 +229,7 @@ export default function WeeklyTimetable() {
   const [movingAssignment, setMovingAssignment] = useState<TimetableAssignment | null>(null);
   const [detailsAssignment, setDetailsAssignment] = useState<TimetableAssignment | null>(null);
   const [issuesModal, setIssuesModal] = useState<'ERROR' | 'WARNING' | null>(null);
+  const [printOpen, setPrintOpen] = useState(false);
   const [draggingAssignment, setDraggingAssignment] = useState<TimetableAssignment | null>(null);
   const [dragOptions, setDragOptions] = useState<PlacementOptionsResponse | null>(null);
   const [instantHintMap, setInstantHintMap] = useState<Map<string, 'allowed' | 'blocked' | 'preferred'>>(new Map());
@@ -249,6 +253,24 @@ export default function WeeklyTimetable() {
         return a.name.localeCompare(b.name, 'el');
       });
   }, [courses, selectedTimetable, yearFilter]);
+
+  // Διαθέσιμες οντότητες ανά διάσταση ομαδοποίησης (από τα τρέχοντα visible assignments).
+  const printAvailable = useMemo<Record<PrintGroupBy, { key: string; label: string }[]>>(() => {
+    const visible = assignments.filter((a) => a.course?.visibleInTimetable !== false);
+    const semMap = new Map<string, string>();
+    const roomMap = new Map<string, string>();
+    const teacherSet = new Set<string>();
+    for (const a of visible) {
+      if (a.course?.semester != null) semMap.set(String(a.course.semester), `${a.course.semester}ο Εξάμηνο`);
+      if (a.room?.id != null) roomMap.set(String(a.room.id), a.room.code);
+      for (const name of parseTeachers(a.course?.teachersText)) teacherSet.add(name);
+    }
+    return {
+      semester: Array.from(semMap.entries()).sort((x, y) => Number(x[0]) - Number(y[0])).map(([key, label]) => ({ key, label })),
+      room: Array.from(roomMap.entries()).sort((x, y) => x[1].localeCompare(y[1], 'el')).map(([key, label]) => ({ key, label })),
+      teacher: Array.from(teacherSet).sort((x, y) => x.localeCompare(y, 'el')).map((name) => ({ key: name, label: name })),
+    };
+  }, [assignments]);
 
   const selectedCourse = useMemo(
     () => courses.find((course) => course.id === selectedCourseId),
@@ -887,70 +909,112 @@ async function runSolver() {
     return <div style={{ padding: '2rem' }}>Φόρτωση δεδομένων...</div>;
   }
 
-  function printWeeklyTimetable() {
+  function printWeeklyTimetable(req: PrintRequest) {
     if (!selectedTimetable || assignments.length === 0) return;
+    const tt = selectedTimetable;
     // Μαθήματα «σε συνεννόηση» δεν τυπώνονται στο επίσημο πρόγραμμα.
-    const printableAssignments = assignments.filter(a => a.course?.visibleInTimetable !== false);
+    const printable = assignments.filter(a => a.course?.visibleInTimetable !== false);
     const DAYS_ALL = [
       {key:'MONDAY',label:'Δευτέρα'},{key:'TUESDAY',label:'Τρίτη'},
       {key:'WEDNESDAY',label:'Τετάρτη'},{key:'THURSDAY',label:'Πέμπτη'},
       {key:'FRIDAY',label:'Παρασκευή'},
     ];
-    const activeDays = DAYS_ALL.filter(d => assignments.some(a => a.timeSlot?.dayOfWeek === d.key));
+    // activeDays/activeHours από ΟΛΑ τα visible → ίδιες στήλες/γραμμές σε κάθε σελίδα-group.
+    const activeDays = DAYS_ALL.filter(d => printable.some(a => a.timeSlot?.dayOfWeek === d.key));
     const activeHours = ALL_HOURS.filter(h =>
-      activeDays.some(d => assignments.some(a =>
+      activeDays.some(d => printable.some(a =>
         a.timeSlot?.dayOfWeek === d.key && a.timeSlot?.startTime?.startsWith(h.slice(0,2))
       ))
     );
-    function getCell(dayKey: string, hour: string): string {
-      const h = hour.slice(0,2);
-      const items = printableAssignments.filter(a =>
-        a.timeSlot?.dayOfWeek === dayKey && a.timeSlot?.startTime?.startsWith(h)
-      );
-      if (!items.length) return '';
-      return items.map((a:any) => {
-        const type = a.assignmentType as string;
-        const tc = TYPE_COLORS[type] ?? TYPE_COLORS.LECTURE;
-        const yc = yearColor(a.course.studyYear);
-        return `<div style="background:${tc.bg};border:1px solid ${tc.border};border-left:3px solid ${yc};border-radius:4px;padding:4px 6px;margin-bottom:3px;">
+    const thS = 'padding:8px 6px;background:#1e40af;color:white;text-align:center;font-size:9pt;border:1px solid #3b82f6;min-width:140px;';
+
+    // Κελί ενός μαθήματος — τιμά colorByYear / showType / showSemesterBadge.
+    function buildCell(a: TimetableAssignment): string {
+      const type = a.assignmentType as string;
+      const tc = TYPE_COLORS[type] ?? TYPE_COLORS.LECTURE;
+      const yc = yearColor(a.course.studyYear);
+      const codeColor = req.colorByYear ? yc : '#334155';
+      const leftStripe = req.colorByYear ? `border-left:3px solid ${yc};` : '';
+      const typeChip = req.showType
+        ? `<span style="font-size:7pt;background:${tc.border}22;color:${tc.border};border-radius:2px;padding:1px 4px;font-weight:600;">${tc.label}</span>`
+        : '';
+      const semBadge = req.showSemesterBadge ? ` · Εξ.${esc(a.course.semester)}` : '';
+      return `<div style="background:${tc.bg};border:1px solid ${tc.border};${leftStripe}border-radius:4px;padding:4px 6px;margin-bottom:3px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
-            <span style="font-weight:700;color:${yc};font-family:monospace;font-size:7.5pt;">${esc(a.course.code)}</span>
-            <span style="font-size:7pt;background:${tc.border}22;color:${tc.border};border-radius:2px;padding:1px 4px;font-weight:600;">${tc.label}</span>
+            <span style="font-weight:700;color:${codeColor};font-family:monospace;font-size:7.5pt;">${esc(a.course.code)}</span>
+            ${typeChip}
           </div>
           <div style="font-size:8pt;font-weight:500;line-height:1.3;color:#1e293b;">${esc(a.course.name)}</div>
-          <div style="font-size:7pt;color:#64748b;">${esc(a.room?.code ?? '')}</div>
+          <div style="font-size:7pt;color:#64748b;">${esc(a.room?.code ?? '')}${semBadge}</div>
         </div>`;
-      }).join('');
     }
-    const semType = (selectedTimetable as any).semesterType === 'FALL' ? 'Χειμερινό'
-                  : (selectedTimetable as any).semesterType === 'SPRING' ? 'Εαρινό' : '';
-    const thS = 'padding:8px 6px;background:#1e40af;color:white;text-align:center;font-size:9pt;border:1px solid #3b82f6;min-width:140px;';
-    const headerHtml = `
-      <div class="hdr">
-        <h1>Ωρολόγιο Πρόγραμμα — ${esc((selectedTimetable as any).name)}</h1>
-        <p>ΤΜΗΥΠ · Πανεπιστήμιο Πατρών${semType ? ` · ${semType} Εξάμηνο` : ''} · ${esc((selectedTimetable as any).academicYear ?? '')}</p>
-        <div class="legend">
-          ${[{l:'Θεωρία',c:'#2563eb'},{l:'Φροντιστήριο',c:'#16a34a'},{l:'Εργαστήριο',c:'#d97706'}]
-            .map(x=>`<div class="ld"><div class="ldot" style="background:${x.c};"></div>${x.l}</div>`).join('')}
-          &nbsp;&nbsp;
-          ${['1ο','2ο','3ο','4ο','5ο'].map((y,i)=>
-            `<div class="ld"><div class="ldot" style="background:${YEAR_COLORS[i]};border-radius:50%;"></div>${y} Έτος</div>`
-          ).join('')}
-        </div>
-      </div>`;
-    const bodyHtml = `
+
+    // Grid για ένα υποσύνολο assignments (ίδιες στήλες/γραμμές με όλο το πρόγραμμα).
+    function buildWeeklyGrid(items: TimetableAssignment[]): string {
+      const cell = (dayKey: string, hour: string): string => {
+        const h = hour.slice(0,2);
+        return items
+          .filter(a => a.timeSlot?.dayOfWeek === dayKey && a.timeSlot?.startTime?.startsWith(h))
+          .map(buildCell).join('');
+      };
+      return `
       <table><thead><tr>
         <th style="padding:6px 8px;background:#1e40af;color:white;font-size:8.5pt;border:1px solid #3b82f6;min-width:50px;">Ώρα</th>
         ${activeDays.map(d=>`<th style="${thS}">${d.label}</th>`).join('')}
       </tr></thead><tbody>
         ${activeHours.map(hour=>`<tr>
           <td style="padding:4px 6px;font-weight:600;font-family:monospace;font-size:8.5pt;background:#f1f5f9;border:1px solid #e2e8f0;white-space:nowrap;">${hour}</td>
-          ${activeDays.map(d=>`<td style="padding:3px;vertical-align:top;border:1px solid #e2e8f0;">${getCell(d.key,hour)}</td>`).join('')}
+          ${activeDays.map(d=>`<td style="padding:3px;vertical-align:top;border:1px solid #e2e8f0;">${cell(d.key,hour)}</td>`).join('')}
         </tr>`).join('')}
       </tbody></table>`;
+    }
+
+    const semType = tt.semesterType === 'FALL' ? 'Χειμερινό'
+                  : tt.semesterType === 'SPRING' ? 'Εαρινό' : '';
+    // Legend προσαρμοσμένο στις επιλογές (type chip / year color).
+    const typeLegend = req.showType
+      ? [{l:'Θεωρία',c:'#2563eb'},{l:'Φροντιστήριο',c:'#16a34a'},{l:'Εργαστήριο',c:'#d97706'}]
+          .map(x=>`<div class="ld"><div class="ldot" style="background:${x.c};"></div>${x.l}</div>`).join('')
+      : '';
+    const yearLegend = req.colorByYear
+      ? ['1ο','2ο','3ο','4ο','5ο'].map((y,i)=>`<div class="ld"><div class="ldot" style="background:${YEAR_COLORS[i]};border-radius:50%;"></div>${y} Έτος</div>`).join('')
+      : '';
+    const legendInner = [typeLegend, yearLegend].filter(Boolean).join('&nbsp;&nbsp;');
+    const legendHtml = legendInner ? `<div class="legend">${legendInner}</div>` : '';
+    const subtitle = `Ωρολόγιο Πρόγραμμα — ${esc(tt.name)}${semType ? ` · ${semType} Εξάμηνο` : ''} · ${esc(tt.academicYear ?? '')}`;
+
+    // Ομαδοποίηση: keys μόνο για το req.groupBy, φιλτραρισμένα στα req.selectedKeys.
+    const selected = new Set(req.selectedKeys);
+    const keysOf = (a: TimetableAssignment): { key: string; title: string; sortKey: string }[] => {
+      if (req.groupBy === 'semester') {
+        const key = String(a.course.semester);
+        return selected.has(key) ? [{ key, title: `${a.course.semester}ο Εξάμηνο`, sortKey: key.padStart(2, '0') }] : [];
+      }
+      if (req.groupBy === 'room') {
+        if (!a.room || !selected.has(String(a.room.id))) return [];
+        return [{ key: String(a.room.id), title: `Αίθουσα ${a.room.code}`, sortKey: a.room.code }];
+      }
+      // TODO Φ-directions: add 'direction' groupBy όταν φτιαχτεί το Direction entity
+      return parseTeachers(a.course.teachersText)
+        .filter(name => selected.has(name))
+        .map(name => ({ key: name, title: `Καθ. ${name}`, sortKey: name }));
+    };
+    const groups = groupItems(printable, keysOf);
+    if (groups.length === 0) return;
+
+    // Μία οντότητα ανά σελίδα (page-break-after εκτός της τελευταίας).
+    const bodyHtml = groups.map((g, idx) => `
+      <div style="${idx < groups.length - 1 ? 'page-break-after:always;' : ''}">
+        <div class="hdr">
+          <h1>${esc(g.title)}</h1>
+          <p>${subtitle}</p>
+          ${legendHtml}
+        </div>${buildWeeklyGrid(g.items)}
+      </div>`).join('');
+
     const html = buildPrintDocument({
-      title: `Ωρολόγιο — ${(selectedTimetable as any).name}`,
-      headerHtml,
+      title: `Ωρολόγιο — ${tt.name}`,
+      headerHtml: '',
       bodyHtml,
     });
     openAndPrint(html);
@@ -1059,7 +1123,7 @@ async function runSolver() {
           )}
 
 <button
-          onClick={printWeeklyTimetable}
+          onClick={() => setPrintOpen(true)}
           disabled={!selectedTimetableId || assignments.length === 0}
           style={{ padding: '6px 14px', border: '1px solid #0f766e', borderRadius: '7px', background: 'transparent', color: '#0f766e', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif" }}
         >🖨 Εκτύπωση</button>
@@ -1549,6 +1613,14 @@ async function runSolver() {
         }
         onClose={() => setIssuesModal(null)}
         getLocation={resolveLocation}
+      />
+
+      <PrintOptionsModal
+        open={printOpen}
+        onClose={() => setPrintOpen(false)}
+        showTypeToggle={true}
+        available={printAvailable}
+        onPrint={(req) => printWeeklyTimetable(req)}
       />
     </div>
   );

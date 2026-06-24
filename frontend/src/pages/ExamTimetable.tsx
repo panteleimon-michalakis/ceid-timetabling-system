@@ -9,7 +9,10 @@ import type {
 import TimetableSelector from '../components/TimetableSelector';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 import ValidationIssuesModal from '../components/ValidationIssuesModal';
-import { esc, ALL_HOURS, yearColor, buildPrintDocument, openAndPrint } from '../utils/printTimetable';
+import { esc, ALL_HOURS, yearColor, buildPrintDocument, openAndPrint, groupItems, parseTeachers } from '../utils/printTimetable';
+import type { PrintGroupBy } from '../utils/printTimetable';
+import PrintOptionsModal from '../components/PrintOptionsModal';
+import type { PrintRequest } from '../components/PrintOptionsModal';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -254,6 +257,7 @@ export default function ExamTimetable() {
   const [detailsAssignment, setDetailsAssignment] = useState<TimetableAssignment | null>(null);
   const [draggingAssignment,setDraggingAssignment]= useState<TimetableAssignment | null>(null);
   const [issuesModal,       setIssuesModal]       = useState<'ERROR' | 'WARNING' | null>(null);
+  const [printOpen,         setPrintOpen]         = useState(false);
 
   const [loading, setLoading]               = useState(false);
   const [loadingOptions, setLoadingOptions] = useState(false);
@@ -318,6 +322,24 @@ export default function ExamTimetable() {
     }
     return Array.from(s).sort();
   }, [examTimeSlots, selectedTimetable]);
+
+  // Διαθέσιμες οντότητες ανά διάσταση ομαδοποίησης (από τα τρέχοντα visible assignments).
+  const printAvailable = useMemo<Record<PrintGroupBy, { key: string; label: string }[]>>(() => {
+    const visible = assignments.filter((a) => a.course?.visibleInTimetable !== false);
+    const semMap = new Map<string, string>();
+    const roomMap = new Map<string, string>();
+    const teacherSet = new Set<string>();
+    for (const a of visible) {
+      if (a.course?.semester != null) semMap.set(String(a.course.semester), `${a.course.semester}ο Εξάμηνο`);
+      if (a.room?.id != null) roomMap.set(String(a.room.id), a.room.code);
+      for (const name of parseTeachers(a.course?.teachersText)) teacherSet.add(name);
+    }
+    return {
+      semester: Array.from(semMap.entries()).sort((x, y) => Number(x[0]) - Number(y[0])).map(([key, label]) => ({ key, label })),
+      room: Array.from(roomMap.entries()).sort((x, y) => x[1].localeCompare(y[1], 'el')).map(([key, label]) => ({ key, label })),
+      teacher: Array.from(teacherSet).sort((x, y) => x.localeCompare(y, 'el')).map((name) => ({ key: name, label: name })),
+    };
+  }, [assignments]);
 
   // Πρώτες ημερομηνίες κάθε εβδομάδας: κενό ≥ 2 ημερών (π.χ. Σαββατοκύριακο) = νέα εβδομάδα.
   const weekStartDates = useMemo(() => {
@@ -558,70 +580,108 @@ export default function ExamTimetable() {
   const allowedOptions = placementOptions?.options.filter(o => o.allowed) ?? [];
   const blockedOptions  = placementOptions?.options.filter(o => !o.allowed) ?? [];
 
-  function printExamSchedule() {
+  function printExamSchedule(req: PrintRequest) {
     if (!selectedTimetable) return;
+    const tt = selectedTimetable;
     // Μαθήματα «σε συνεννόηση» δεν τυπώνονται στο επίσημο πρόγραμμα.
-    const printableAssignments = assignments.filter(a => a.course?.visibleInTimetable !== false);
+    const printable = assignments.filter(a => a.course?.visibleInTimetable !== false);
     const assignedDates = new Set(
-      printableAssignments.map(a => a.timeSlot?.specificDate).filter(Boolean) as string[]
+      printable.map(a => a.timeSlot?.specificDate).filter(Boolean) as string[]
     );
-    const printDates = examDates.filter(d => assignedDates.has(d));
-    if (printDates.length === 0) { alert('Δεν υπάρχουν τοποθετημένες εξετάσεις.'); return; }
-    const activeHours = ALL_HOURS.filter(hour =>
-      printDates.some(date =>
-        assignments.some(a =>
-          a.timeSlot?.specificDate === date &&
-          parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '0') === parseInt(hour)
-        )
-      )
-    );
-    function fmtDate(d: string) {
+    const globalDates = examDates.filter(d => assignedDates.has(d));
+    if (globalDates.length === 0) { alert('Δεν υπάρχουν τοποθετημένες εξετάσεις.'); return; }
+
+    function fmtDate(d: string): string {
       try { const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('el-GR', { weekday: 'short', day: 'numeric', month: 'numeric' }); }
       catch { return d; }
     }
-    function getCell(date: string, hour: string) {
-      const h = parseInt(hour);
-      const items = printableAssignments.filter(a =>
-        a.timeSlot?.specificDate === date &&
-        parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '0') === h
-      );
-      if (!items.length) return '';
-      return items.map(a => {
-        const yc = yearColor(a.course.studyYear);
-        const dur = a.examDurationMinutes ? `${a.examDurationMinutes / 60}h` : '3h';
-        return `<div style="background:#f8fafc;border:1px solid ${yc};border-left:3px solid ${yc};border-radius:4px;padding:4px 6px;margin-bottom:3px;">
-          <div style="font-weight:700;color:${yc};font-family:monospace;font-size:7.5pt;">${esc(a.course.code)}</div>
+    // Κελί μιας εξέτασης — τιμά colorByYear / showSemesterBadge (δεν υπάρχει type chip).
+    function buildCell(a: TimetableAssignment): string {
+      const yc = yearColor(a.course.studyYear);
+      const dur = a.examDurationMinutes ? `${a.examDurationMinutes / 60}h` : '3h';
+      const border = req.colorByYear ? yc : '#cbd5e1';
+      const stripe = req.colorByYear ? `border-left:3px solid ${yc};` : '';
+      const codeColor = req.colorByYear ? yc : '#334155';
+      const semBadge = req.showSemesterBadge ? ` · Εξ.${esc(a.course.semester)}` : '';
+      return `<div style="background:#f8fafc;border:1px solid ${border};${stripe}border-radius:4px;padding:4px 6px;margin-bottom:3px;">
+          <div style="font-weight:700;color:${codeColor};font-family:monospace;font-size:7.5pt;">${esc(a.course.code)}</div>
           <div style="font-size:8pt;font-weight:500;line-height:1.3;">${esc(a.course.name)}</div>
-          <div style="font-size:7pt;color:#64748b;">${esc(a.room?.code ?? '')} · ${dur}</div>
+          <div style="font-size:7pt;color:#64748b;">${esc(a.room?.code ?? '')} · ${dur}${semBadge}</div>
         </div>`;
-      }).join('');
     }
-    const CHUNK = 8;
-    const chunks: string[][] = [];
-    for (let i = 0; i < printDates.length; i += CHUNK) chunks.push(printDates.slice(i, i + CHUNK));
-    const thStyle = `padding:6px 4px;background:#1e40af;color:white;text-align:center;font-size:8.5pt;min-width:110px;border:1px solid #3b82f6;`;
-    const legend = ['1ο Έτος','2ο Έτος','3ο Έτος','4ο Έτος','5ο Έτος'].map((y,i)=>`<div class="ld"><div class="ldot" style="background:${yearColor(i+1)}"></div>${y}</div>`).join('');
-    const tables = chunks.map((chunk, idx) => `
-      <div style="${idx < chunks.length - 1 ? 'page-break-after:always;' : ''}">
-        <div class="hdr">
-          <h1>Εξεταστική Περίοδος — ${esc(selectedTimetable.name)}${chunks.length > 1 ? ` (${idx+1}/${chunks.length})` : ''}</h1>
-          <p>ΤΜΗΥΠ · Πανεπιστήμιο Πατρών &nbsp;·&nbsp; ${fmtDate(chunk[0])} — ${fmtDate(chunk[chunk.length-1])}</p>
-          <div class="legend">${legend}</div>
-        </div>
+    // Grid (dates×hours, chunk-by-8) για ένα υποσύνολο. Per-group dates/hours → compact σελίδες.
+    function buildExamGrid(items: TimetableAssignment[]): string {
+      const dates = globalDates.filter(d => items.some(a => a.timeSlot?.specificDate === d));
+      if (dates.length === 0) return '';
+      const hours = ALL_HOURS.filter(hour =>
+        dates.some(date => items.some(a =>
+          a.timeSlot?.specificDate === date &&
+          parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '0') === parseInt(hour)
+        ))
+      );
+      const cell = (date: string, hour: string): string => {
+        const h = parseInt(hour);
+        return items
+          .filter(a => a.timeSlot?.specificDate === date && parseInt(a.timeSlot?.startTime?.split(':')[0] ?? '0') === h)
+          .map(buildCell).join('');
+      };
+      const CHUNK = 8;
+      const chunks: string[][] = [];
+      for (let i = 0; i < dates.length; i += CHUNK) chunks.push(dates.slice(i, i + CHUNK));
+      const thStyle = `padding:6px 4px;background:#1e40af;color:white;text-align:center;font-size:8.5pt;min-width:110px;border:1px solid #3b82f6;`;
+      return chunks.map((chunk, ci) => `
+      <div style="${ci < chunks.length - 1 ? 'page-break-after:always;' : ''}">
         <table><thead><tr>
           <th style="padding:6px 8px;background:#1e40af;color:white;font-size:8.5pt;border:1px solid #3b82f6;min-width:50px;">Ώρα</th>
           ${chunk.map(d=>`<th style="${thStyle}">${fmtDate(d)}<div style="font-size:7pt;opacity:0.75;">${d}</div></th>`).join('')}
         </tr></thead><tbody>
-          ${activeHours.map(hour=>`<tr>
+          ${hours.map(hour=>`<tr>
             <td style="padding:4px 6px;font-weight:600;font-family:monospace;font-size:8.5pt;background:#f1f5f9;border:1px solid #e2e8f0;white-space:nowrap;">${hour}</td>
-            ${chunk.map(date=>`<td style="padding:3px;vertical-align:top;border:1px solid #e2e8f0;min-width:110px;">${getCell(date,hour)}</td>`).join('')}
+            ${chunk.map(date=>`<td style="padding:3px;vertical-align:top;border:1px solid #e2e8f0;min-width:110px;">${cell(date,hour)}</td>`).join('')}
           </tr>`).join('')}
         </tbody></table>
       </div>`).join('');
+    }
+
+    const yearLegend = req.colorByYear
+      ? ['1ο Έτος','2ο Έτος','3ο Έτος','4ο Έτος','5ο Έτος'].map((y,i)=>`<div class="ld"><div class="ldot" style="background:${yearColor(i+1)}"></div>${y}</div>`).join('')
+      : '';
+    const legendHtml = yearLegend ? `<div class="legend">${yearLegend}</div>` : '';
+
+    // Ομαδοποίηση: keys μόνο για το req.groupBy, φιλτραρισμένα στα req.selectedKeys.
+    const selected = new Set(req.selectedKeys);
+    const keysOf = (a: TimetableAssignment): { key: string; title: string; sortKey: string }[] => {
+      if (req.groupBy === 'semester') {
+        const key = String(a.course.semester);
+        return selected.has(key) ? [{ key, title: `${a.course.semester}ο Εξάμηνο`, sortKey: key.padStart(2, '0') }] : [];
+      }
+      if (req.groupBy === 'room') {
+        if (!a.room || !selected.has(String(a.room.id))) return [];
+        return [{ key: String(a.room.id), title: `Αίθουσα ${a.room.code}`, sortKey: a.room.code }];
+      }
+      // TODO Φ-directions: add 'direction' groupBy όταν φτιαχτεί το Direction entity
+      return parseTeachers(a.course.teachersText)
+        .filter(name => selected.has(name))
+        .map(name => ({ key: name, title: `Καθ. ${name}`, sortKey: name }));
+    };
+    const groups = groupItems(printable, keysOf);
+    const renderable = groups.map(g => ({ g, html: buildExamGrid(g.items) })).filter(x => x.html);
+    if (renderable.length === 0) { alert('Δεν υπάρχουν τοποθετημένες εξετάσεις.'); return; }
+
+    // Μία οντότητα ανά σελίδα (page-break-after εκτός της τελευταίας).
+    const bodyHtml = renderable.map(({ g, html }, idx) => `
+      <div style="${idx < renderable.length - 1 ? 'page-break-after:always;' : ''}">
+        <div class="hdr">
+          <h1>${esc(g.title)}</h1>
+          <p>Εξεταστική Περίοδος — ${esc(tt.name)} &nbsp;·&nbsp; ΤΜΗΥΠ · Πανεπιστήμιο Πατρών</p>
+          ${legendHtml}
+        </div>${html}
+      </div>`).join('');
+
     const html = buildPrintDocument({
-      title: `Εξεταστική — ${selectedTimetable.name}`,
+      title: `Εξεταστική — ${tt.name}`,
       headerHtml: '',
-      bodyHtml: tables,
+      bodyHtml,
       h1FontSizePt: 12,
       legendGapPx: 10,
       legendWrap: false,
@@ -696,7 +756,7 @@ export default function ExamTimetable() {
               🗑 Καθαρισμός
             </button>
             <button
-              onClick={printExamSchedule}
+              onClick={() => setPrintOpen(true)}
               disabled={assignments.length === 0}
               style={{ ...solverBtn, background: assignments.length > 0 ? '#0f766e' : '#334155', border: 'none' }}
             >
@@ -1139,6 +1199,14 @@ export default function ExamTimetable() {
         issues={issuesModal === 'ERROR' ? (validation?.errors ?? []) : issuesModal === 'WARNING' ? (validation?.warnings ?? []) : []}
         onClose={() => setIssuesModal(null)}
         getLocation={resolveLocation}
+      />
+
+      <PrintOptionsModal
+        open={printOpen}
+        onClose={() => setPrintOpen(false)}
+        showTypeToggle={false}
+        available={printAvailable}
+        onPrint={(req) => printExamSchedule(req)}
       />
     </div>
   );

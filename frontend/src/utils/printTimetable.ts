@@ -74,3 +74,39 @@ export function openAndPrint(html: string): void {
   if (!win) { alert('Επέτρεψε τα pop-ups του browser για εκτύπωση.'); return; }
   win.document.write(html); win.document.close(); win.onload = () => win.print();
 }
+
+// ─── Φ5b: grouping (μία οντότητα/σελίδα) ────────────────────────────────────
+
+export type PrintGroupBy = 'semester' | 'room' | 'teacher';
+
+export interface PrintGroup<T> { key: string; title: string; items: T[]; }
+
+/** Parse του derived teachersText (CSV) → μοναδικά ονόματα. Φ2: derived από το canonical M2M. */
+export function parseTeachers(teachersText?: string | null): string[] {
+  if (!teachersText) return [];
+  return Array.from(new Set(
+    teachersText.split(/[,;]/).map(s => s.trim()).filter(Boolean)
+  ));
+}
+
+/**
+ * Ομαδοποίηση: επιστρέφει ordered groups. Ένα item μπορεί να ανήκει σε ΠΟΛΛΑ groups
+ * (π.χ. μάθημα με 2 διδάσκοντες → εμφανίζεται σε 2 teacher-pages).
+ * keysOf(item) → λίστα {key,title,sortKey} στα οποία ανήκει το item.
+ * Τα groups ταξινομούνται με sortKey (string compare, locale 'el').
+ */
+export function groupItems<T>(
+  items: T[],
+  keysOf: (item: T) => { key: string; title: string; sortKey: string }[]
+): PrintGroup<T>[] {
+  const map = new Map<string, { title: string; sortKey: string; items: T[] }>();
+  for (const it of items) {
+    for (const { key, title, sortKey } of keysOf(it)) {
+      if (!map.has(key)) map.set(key, { title, sortKey, items: [] });
+      map.get(key)!.items.push(it);
+    }
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => a[1].sortKey.localeCompare(b[1].sortKey, 'el'))
+    .map(([key, v]) => ({ key, title: v.title, items: v.items }));
+}
