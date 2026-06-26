@@ -592,3 +592,29 @@ id). Compile-time safety: ο τύπος `TimetableScopedCourse` (χωρίς Cour
 completeness (δεν είναι «αναμενόμενο»). Στη φυσιολογική ροή (κατάλογος→δημιουργία→λύση) δεν
 προκύπτει· σκόπιμο & προβλέψιμο. Tests: `TimetableScopeImmutabilityTest` ×5 (freeze-on-create,
 immunity, new-sees-it, delete-survival, idempotency)· full suite **140/140** πράσινα.
+
+## 📋 Professor-facing σύνοψη — Πλήρης immutability (S3 + #5)
+
+Η απαίτηση του καθηγητή (οι αλλαγές σε μαθήματα ΔΕΝ πρέπει να επηρεάζουν
+αναδρομικά υπάρχοντα προγράμματα) καλύπτεται πλέον πλήρως, σε δύο διαστάσεις
+που παγώνουν τη στιγμή δημιουργίας κάθε προγράμματος:
+
+1. **Display immutability (S3, ανά ανάθεση):** όνομα/διδάσκοντες/αίθουσα κ.λπ.
+   render-άρονται από snapshot. Μετονομασία μαθήματος δεν αλλάζει υπάρχοντα
+   προγράμματα· νέα προγράμματα δείχνουν το νέο όνομα.
+2. **Membership immutability (#5, ανά πρόγραμμα — V6 timetable_scoped_courses):**
+   το «ποια μαθήματα ανήκουν» + οι απαιτούμενες ώρες παγώνουν στη δημιουργία.
+   Το completeness διαβάζει αυτό, όχι τον live κατάλογο. Προσθήκη/διαγραφή/edit
+   μαθήματος δεν εισάγει/αφαιρεί phantom warnings σε υπάρχοντα προγράμματα.
+
+**Acceptance testing (χειροκίνητο, επιβεβαιωμένο):**
+- Προσθήκη νέου μαθήματος «Test» (CEID_1111): κανένα warning σε υπάρχοντα
+  προγράμματα· σε νέο χειμερινό πρόγραμμα εμφανίστηκε κανονικά στα warnings.
+- Μετονομασία υπάρχοντος μαθήματος: υπάρχον πρόγραμμα κράτησε το παλιό όνομα·
+  νέο πρόγραμμα έδειξε το νέο όνομα.
+- Αυτοματοποιημένα: TimetableScopeImmutabilityTest ×5 (freeze-on-create,
+  immunity, new-sees-it, delete-survival, idempotency). Full suite 140/140.
+
+**Σχεδιαστική επιλογή:** το course_id στο timetable_scoped_courses είναι χωρίς
+foreign key (denormalized snapshot πεδία) ώστε το ιστορικό scope να επιβιώνει
+ακόμη και σε hard delete μαθήματος. Solver candidate set ανέπαφος.
