@@ -1931,8 +1931,8 @@ if (examTimetable
             return ResponseEntity.notFound().build();
         }
         try {
-            // Όριο 5–120 δευτ.: κακό/κακόβουλο input δεν δεσμεύει τον server
-            int safeLimit = Math.max(5, Math.min(timeLimit, 120));
+            // Όριο 5–300 δευτ.: κακό/κακόβουλο input δεν δεσμεύει τον server
+            int safeLimit = Math.max(5, Math.min(timeLimit, 300));
             Map<String, Object> result = solverService.solve(id, safeLimit);
             return ResponseEntity.ok(result);
         } catch (Exception e) {

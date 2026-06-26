@@ -45,14 +45,14 @@ class ConstraintWeightSeederTest {
     @Test
     void cleanDb_seedsEveryCatalogRowWithDefaults() {
         // Καμία ορφανή/λείπουσα γραμμή: ένα row ανά catalog Def.
-        assertEquals(31, SolverWeights.catalog().size(), "ο κατάλογος έχει 31 κανόνες");
+        assertEquals(34, SolverWeights.catalog().size(), "ο κατάλογος έχει 34 κανόνες");
         assertEquals(SolverWeights.catalog().size(), repo.count(),
                 "ένα persisted row ανά catalog Def");
 
         // Μοναδικότητα keys (κανένα διπλό).
         long distinctKeys = SolverWeights.catalog().stream()
                 .map(SolverWeights.Def::key).distinct().count();
-        assertEquals(31, distinctKeys, "όλα τα catalog keys μοναδικά");
+        assertEquals(34, distinctKeys, "όλα τα catalog keys μοναδικά");
 
         for (SolverWeights.Def d : SolverWeights.catalog()) {
             ConstraintWeightConfig row = repo.findByConstraintKey(d.key())

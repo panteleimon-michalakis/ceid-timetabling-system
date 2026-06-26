@@ -51,7 +51,7 @@ public final class SolverWeights {
     public record Def(String key, String scope, String level, int defaultWeight,
                       String displayName, String description) {}
 
-    /** Ο πλήρης κατάλογος των 31 κανόνων — η αυθεντική πηγή. Immutable. */
+    /** Ο πλήρης κατάλογος των 34 κανόνων — η αυθεντική πηγή. Immutable. */
     private static final List<Def> CATALOG = buildCatalog();
 
     /** Compiled defaults (key -> weight), παραγόμενα από το catalog. Immutable. */
@@ -117,6 +117,17 @@ public final class SolverWeights {
         c.add(new Def("WEEKLY_DIRECTION_GROUP_A", "WEEKLY", "SOFT", 5,
                 "Σύμπτωση μαθημάτων κατεύθυνσης (Ομάδα Α)",
                 "Μαθήματα Ομάδας Α της ίδιας κατεύθυνσης τοποθετημένα την ίδια ώρα."));
+
+        // ===== WEEKLY — SOFT (B: συνοχή block ίδιου μαθήματος) =====
+        c.add(new Def("WEEKLY_SAME_COURSE_DIFFERENT_DAY", "WEEKLY", "SOFT", 8,
+                "Ίδιο μάθημα σε διαφορετική μέρα",
+                "Ώρες του ίδιου μαθήματος/τύπου τοποθετημένες σε διαφορετικές ημέρες (εμποδίζει ενιαίο block)."));
+        c.add(new Def("WEEKLY_SAME_COURSE_NONADJACENT", "WEEKLY", "SOFT", 5,
+                "Μη διαδοχικές ώρες ίδιου μαθήματος",
+                "Κενά ανάμεσα στις ώρες του ίδιου μαθήματος/τύπου την ίδια μέρα (να γίνουν διαδοχικές)."));
+        c.add(new Def("WEEKLY_SAME_COURSE_DIFFERENT_ROOM", "WEEKLY", "SOFT", 3,
+                "Ίδιο μάθημα σε διαφορετική αίθουσα",
+                "Ώρες του ίδιου μαθήματος/τύπου σε διαφορετικές αίθουσες (ενιαία αίθουσα για το block)."));
 
         // ===== EXAM (ExamConstraintProvider) — HARD =====
         c.add(new Def("EXAM_TEACHER_CONFLICT", "EXAM", "HARD", 1,

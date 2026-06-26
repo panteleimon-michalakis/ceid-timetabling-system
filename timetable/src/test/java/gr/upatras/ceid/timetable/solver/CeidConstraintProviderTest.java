@@ -327,4 +327,76 @@ class CeidConstraintProviderTest {
         verifier.verifyThat(CeidConstraintProvider::teacherPreferredSlot)
                 .given(l).penalizesBy(3);
     }
+
+    // ---------- SOFT — B: συνοχή block ίδιου μαθήματος ----------
+
+    @Test
+    void sameCourseDifferentDay_penalizesSplitAcrossDays() {
+        Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(10, "MONDAY", 9), BETA, "T1|A");
+        Lesson b = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(11, "TUESDAY", 9), BETA, "T1|A");
+        verifier.verifyThat(CeidConstraintProvider::weeklySameCourseDifferentDay)
+                .given(a, b).penalizesBy(8);
+    }
+
+    @Test
+    void sameCourseDifferentDay_noPenaltySameDay() {
+        Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(10, "MONDAY", 9), BETA, "T1|A");
+        Lesson b = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(11, "MONDAY", 10), BETA, "T1|A");
+        verifier.verifyThat(CeidConstraintProvider::weeklySameCourseDifferentDay)
+                .given(a, b).penalizesBy(0);
+    }
+
+    @Test
+    void sameCourseDifferentDay_noPenaltyDifferentCourse() {
+        // Διαφορετικό courseId → ο join (courseId+assignmentType) δεν ζευγαρώνει.
+        Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(10, "MONDAY", 9), BETA, "T1|A");
+        Lesson b = lesson(2, "C2", 2, "REQUIRED", "LECTURE", 100, slot(11, "TUESDAY", 9), BETA, "T2|B");
+        verifier.verifyThat(CeidConstraintProvider::weeklySameCourseDifferentDay)
+                .given(a, b).penalizesBy(0);
+    }
+
+    @Test
+    void sameCourseDifferentDay_noPenaltyDifferentType() {
+        // ΙΔΙΟ courseId αλλά ΔΙΑΦΟΡΕΤΙΚΟΣ assignmentType (θεωρία vs φροντιστήριο)
+        // → blocks ανά τύπο: ΔΕΝ πρέπει να ζευγαρώνουν, ποινή 0. Guard ώστε το
+        // assignmentType να μη φύγει ποτέ από τον join.
+        Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE",  100, slot(10, "MONDAY", 9),  BETA, "T1|A");
+        Lesson b = lesson(1, "C1", 2, "REQUIRED", "TUTORIAL", 100, slot(11, "TUESDAY", 9), BETA, "T1|A");
+        verifier.verifyThat(CeidConstraintProvider::weeklySameCourseDifferentDay)
+                .given(a, b).penalizesBy(0);
+    }
+
+    @Test
+    void sameCourseNonAdjacent_noPenaltyConsecutive() {
+        Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(10, "MONDAY", 9),  BETA, "T1|A");
+        Lesson b = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(11, "MONDAY", 10), BETA, "T1|A");
+        Lesson c = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(12, "MONDAY", 11), BETA, "T1|A");
+        verifier.verifyThat(CeidConstraintProvider::weeklySameCourseNonAdjacent)
+                .given(a, b, c).penalizesBy(0);
+    }
+
+    @Test
+    void sameCourseNonAdjacent_penalizesGap() {
+        // 9 και 11 → κενό στη 10. dailyGapPenalty = 2*1 = 2· weight 5 → 10.
+        Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(10, "MONDAY", 9),  BETA, "T1|A");
+        Lesson b = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(12, "MONDAY", 11), BETA, "T1|A");
+        verifier.verifyThat(CeidConstraintProvider::weeklySameCourseNonAdjacent)
+                .given(a, b).penalizesBy(10);
+    }
+
+    @Test
+    void sameCourseDifferentRoom_penalizesDifferentRooms() {
+        Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(10, "MONDAY", 9),  BETA,  "T1|A");
+        Lesson b = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(11, "MONDAY", 10), GAMMA, "T1|A");
+        verifier.verifyThat(CeidConstraintProvider::weeklySameCourseDifferentRoom)
+                .given(a, b).penalizesBy(3);
+    }
+
+    @Test
+    void sameCourseDifferentRoom_noPenaltySameRoom() {
+        Lesson a = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(10, "MONDAY", 9),  BETA, "T1|A");
+        Lesson b = lesson(1, "C1", 2, "REQUIRED", "LECTURE", 100, slot(11, "MONDAY", 10), BETA, "T1|A");
+        verifier.verifyThat(CeidConstraintProvider::weeklySameCourseDifferentRoom)
+                .given(a, b).penalizesBy(0);
+    }
 }

@@ -39,6 +39,11 @@ public class CeidConstraintProvider implements ConstraintProvider {
         requiredSameYearGaps(factory),
 
 	directionGroupAConflict(factory),
+
+        // SOFT — B: συνοχή block ίδιου μαθήματος (consecutive-block)
+        weeklySameCourseDifferentDay(factory),
+        weeklySameCourseNonAdjacent(factory),
+        weeklySameCourseDifferentRoom(factory),
         };
     }
 
@@ -275,5 +280,57 @@ public class CeidConstraintProvider implements ConstraintProvider {
             }
         }
         return false;
+    }
+
+    // ===== SOFT — B: συνοχή block ίδιου μαθήματος =====
+    // Στόχος: οι ώρες του ίδιου (courseId, assignmentType) να σχηματίζουν ΕΝΑ
+    // ενιαίο block — ίδια μέρα, διαδοχικές ώρες, ίδια αίθουσα — ώστε το print
+    // rowspan merge να τις ενώνει. Τρία ανεξάρτητα-tunable SOFT constraints.
+    //
+    // ΑΝΑ ΤΥΠΟ, ΟΧΙ ανά μάθημα: ο join γίνεται σε (courseId, assignmentType), άρα
+    // π.χ. 3Θ+2Φ+2Ε → τρία ΞΕΧΩΡΙΣΤΑ blocks (3 θεωρίας μαζί, 2 φροντ. μαζί,
+    // 2 εργ. μαζί), όχι ένα 7ωρο. ΜΗΝ αφαιρέσεις το assignmentType από join/groupBy.
+
+    /** SOFT (B): ποινή όταν ώρες ίδιου μαθήματος/τύπου πέφτουν σε διαφορετική μέρα. */
+    Constraint weeklySameCourseDifferentDay(ConstraintFactory factory) {
+        return factory.forEachUniquePair(Lesson.class,
+                        Joiners.equal(Lesson::getCourseId),
+                        Joiners.equal(Lesson::getAssignmentType))
+                .filter((a, b) ->
+                        a.getTimeSlot() != null && b.getTimeSlot() != null
+                        && !a.getTimeSlot().getDayOfWeek().equals(b.getTimeSlot().getDayOfWeek()))
+                .penalize(HardSoftScore.ONE_SOFT,
+                        (a, b) -> SolverWeights.w("WEEKLY_SAME_COURSE_DIFFERENT_DAY"))
+                .asConstraint("Same course different day");
+    }
+
+    /**
+     * SOFT (B): ποινή για κενά ανάμεσα στις ίδια-μέρα ώρες του ίδιου μαθήματος/τύπου.
+     * Ίδιο μοτίβο με requiredSameYearGaps: groupBy ανά (course|type, μέρα) + reuse
+     * του dailyGapPenalty. Τέλειο συνεχόμενο block → 0 ποινή (καθαρό μηδέν).
+     */
+    Constraint weeklySameCourseNonAdjacent(ConstraintFactory factory) {
+        return factory.forEach(Lesson.class)
+                .filter(l -> l.getTimeSlot() != null)
+                .groupBy(l -> l.getCourseId() + "|" + l.getAssignmentType(),
+                         l -> l.getTimeSlot().getDayOfWeek(),
+                         ConstraintCollectors.toList())
+                .penalize(HardSoftScore.ONE_SOFT,
+                        (courseKey, day, lessons) ->
+                                SolverWeights.w("WEEKLY_SAME_COURSE_NONADJACENT") * dailyGapPenalty(lessons))
+                .asConstraint("Same course non-adjacent hours");
+    }
+
+    /** SOFT (B): ποινή όταν ώρες ίδιου μαθήματος/τύπου τοποθετούνται σε διαφορετική αίθουσα. */
+    Constraint weeklySameCourseDifferentRoom(ConstraintFactory factory) {
+        return factory.forEachUniquePair(Lesson.class,
+                        Joiners.equal(Lesson::getCourseId),
+                        Joiners.equal(Lesson::getAssignmentType))
+                .filter((a, b) ->
+                        a.getRoom() != null && b.getRoom() != null
+                        && !a.getRoom().equals(b.getRoom()))
+                .penalize(HardSoftScore.ONE_SOFT,
+                        (a, b) -> SolverWeights.w("WEEKLY_SAME_COURSE_DIFFERENT_ROOM"))
+                .asConstraint("Same course different room");
     }
 }

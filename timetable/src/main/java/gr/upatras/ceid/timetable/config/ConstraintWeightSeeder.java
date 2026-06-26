@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
  * {@link SolverWeights#catalog()} (single source). <b>Insert-if-absent</b>:
  * κάθε υπάρχον row (πιθανό admin edit) ΔΕΝ πειράζεται — κανένα UPDATE — ώστε
  * αλλαγές βαρών να ΜΗΝ χάνονται σε restart. Idempotent / re-runnable: σε ήδη-
- * seeded ή CI-clean-then-seeded βάση τα 31 rows μένουν άθικτα.
+ * seeded ή CI-clean-then-seeded βάση τα 34 rows μένουν άθικτα.
  *
  * <p>Ίδιο idiom με {@code SnapshotBackfillRunner}. {@code @Order(50)}: μετά τον
  * {@code UserSeeder} (@Order 1), ανεξάρτητο από τον {@code SnapshotBackfillRunner}

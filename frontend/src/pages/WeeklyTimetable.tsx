@@ -895,14 +895,14 @@ async function runAutoSchedule() {
 
 async function runSolver() {
     if (!selectedTimetableId) return;
-    if (!confirm('Εκτέλεση Timefold;\n\nΘα αντικαταστήσει τις αυτόματα τοποθετημένες ώρες.\nΟι χειροκίνητες τοποθετήσεις θα παραμείνουν.\nΔιάρκεια: ~30 δευτερόλεπτα.')) return;
+    if (!confirm('Εκτέλεση Timefold;\n\nΘα αντικαταστήσει τις αυτόματα τοποθετημένες ώρες.\nΟι χειροκίνητες τοποθετήσεις θα παραμείνουν.\nΔιάρκεια: ~5 λεπτά.')) return;
 
     setScheduling(true);
     setError(null);
     setMessage(null);
 
     try {
-      const res = await timetableService.solve(selectedTimetableId, 30);
+      const res = await timetableService.solve(selectedTimetableId, 300);
       const data = res.data as any;
       setMessage(
         `Timefold: ${data.totalPlaced} ώρες τοποθετήθηκαν | Hard: ${data.hardScore} | Soft: ${data.softScore} | ${(data.solveTimeMs / 1000).toFixed(1)}s`
