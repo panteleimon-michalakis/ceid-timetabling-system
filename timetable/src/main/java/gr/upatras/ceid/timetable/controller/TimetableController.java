@@ -6,6 +6,10 @@ import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
 import gr.upatras.ceid.timetable.entity.RoomConstraint;
 import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import gr.upatras.ceid.timetable.util.ExamDateRules;
+import gr.upatras.ceid.timetable.entity.TimetableScopedCourse;
+import gr.upatras.ceid.timetable.repository.TimetableScopedCourseRepository;
+import gr.upatras.ceid.timetable.service.TimetableScopeService;
+import gr.upatras.ceid.timetable.util.CourseRelevance;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -32,6 +36,8 @@ private final TimeSlotRepository timeSlotRepo;
 private final CourseTeacherRepository courseTeacherRepo;
 private final gr.upatras.ceid.timetable.solver.SolverService solverService;
 private final gr.upatras.ceid.timetable.service.AssignmentSnapshotStamper snapshotStamper;
+private final TimetableScopeService scopeService;
+private final TimetableScopedCourseRepository scopedCourseRepo;
 public TimetableController(TimetableRepository timetableRepo,
                            TimetableAssignmentRepository assignmentRepo,
                            CourseRepository courseRepo,
@@ -40,8 +46,12 @@ public TimetableController(TimetableRepository timetableRepo,
                            CourseTeacherRepository courseTeacherRepo,
                            RoomConstraintRepository roomConstraintRepo,
                            gr.upatras.ceid.timetable.solver.SolverService solverService,
-                           gr.upatras.ceid.timetable.service.AssignmentSnapshotStamper snapshotStamper) {
+                           gr.upatras.ceid.timetable.service.AssignmentSnapshotStamper snapshotStamper,
+                           gr.upatras.ceid.timetable.service.TimetableScopeService scopeService,
+                           gr.upatras.ceid.timetable.repository.TimetableScopedCourseRepository scopedCourseRepo) {
     this.snapshotStamper = snapshotStamper;
+    this.scopeService = scopeService;
+    this.scopedCourseRepo = scopedCourseRepo;
     this.roomConstraintRepo = roomConstraintRepo;
     this.timetableRepo = timetableRepo;
     this.assignmentRepo = assignmentRepo;
@@ -103,6 +113,7 @@ private final RoomConstraintRepository roomConstraintRepo;
     }
 
     @PostMapping
+    @Transactional
 public ResponseEntity<?> create(@RequestBody Map<String, String> body) {
     String name = body.get("name");
 
@@ -171,7 +182,9 @@ public ResponseEntity<?> create(@RequestBody Map<String, String> body) {
             .createdAt(LocalDateTime.now())
             .build();
 
-    return ResponseEntity.ok(timetableRepo.save(t));
+    Timetable saved = timetableRepo.save(t);
+    scopeService.materializeScopeIfAbsent(saved); // #5: πάγωσε το scope στη γέννηση
+    return ResponseEntity.ok(saved);
 }
 
     /**
@@ -922,10 +935,7 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
     Timetable timetable = timetableOpt.get();
     List<TimetableAssignment> assignments = assignmentRepo.findByTimetableId(id);
 
-    List<Course> relevantCourses = courseRepo.findAll()
-            .stream()
-            .filter(course -> isCourseRelevantForTimetable(course, timetable))
-            .toList();
+    List<TimetableScopedCourse> relevantCourses = scopedCoursesFor(timetable);
 
     // Για πρόγραμμα εξεταστικής:
     // Δεν μετράμε ώρες θεωρίας/φροντιστηρίου/εργαστηρίου.
@@ -943,19 +953,19 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
 
         List<Map<String, Object>> missingCourses = new ArrayList<>();
 
-        for (Course course : relevantCourses) {
-            boolean hasExam = course.getId() != null && coursesWithExam.contains(course.getId());
+        for (TimetableScopedCourse course : relevantCourses) {
+            boolean hasExam = course.getCourseId() != null && coursesWithExam.contains(course.getCourseId());
 
             if (hasExam) {
                 completedCourses++;
             } else {
                 Map<String, Object> missing = new LinkedHashMap<>();
-                missing.put("courseId", course.getId());
-                missing.put("code", course.getCode());
-                missing.put("name", course.getName());
-                missing.put("semester", course.getSemester());
-                missing.put("studyYear", course.getStudyYear());
-                missing.put("courseType", course.getCourseType() != null ? course.getCourseType().name() : null);
+                missing.put("courseId", course.getCourseId());
+                missing.put("code", course.getSnapshotCourseCode());
+                missing.put("name", course.getSnapshotCourseName());
+                missing.put("semester", course.getSnapshotSemester());
+                missing.put("studyYear", course.getSnapshotStudyYear());
+                missing.put("courseType", course.getSnapshotCourseType());
                 missing.put("missingReason", "Δεν έχει τοποθετηθεί εξέταση για το μάθημα.");
 
                 missingCourses.add(missing);
@@ -987,7 +997,7 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
     // Μέτρα μόνο τις ώρες που ανήκουν σε relevant μαθήματα του εξαμήνου,
     // ώστε πλεονάζουσες/εκτός-εξαμήνου αναθέσεις να μην παραποιούν το ποσοστό.
     Set<Long> relevantCourseIds = relevantCourses.stream()
-            .map(Course::getId).filter(Objects::nonNull).collect(Collectors.toSet());
+            .map(TimetableScopedCourse::getCourseId).filter(Objects::nonNull).collect(Collectors.toSet());
     int totalPlacedHours = (int) assignments.stream()
             .filter(a -> a.getCourse() != null && a.getCourse().getId() != null)
             .filter(a -> relevantCourseIds.contains(a.getCourse().getId()))
@@ -996,19 +1006,19 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
 
     List<Map<String, Object>> missingCourses = new ArrayList<>();
 
-    for (Course course : relevantCourses) {
-        int requiredLecture = course.getLectureHours();
-        int requiredTutorial = course.getTutorialHours();
-        int requiredLab = course.getLabHours();
+    for (TimetableScopedCourse course : relevantCourses) {
+        int requiredLecture = course.getReqLectureHours();
+        int requiredTutorial = course.getReqTutorialHours();
+        int requiredLab = course.getReqLabHours();
 
         int placedLecture = countPlacedHoursForCourseAndType(
-                assignments, course, TimetableAssignment.AssignmentType.LECTURE
+                assignments, course.getCourseId(), TimetableAssignment.AssignmentType.LECTURE
         );
         int placedTutorial = countPlacedHoursForCourseAndType(
-                assignments, course, TimetableAssignment.AssignmentType.TUTORIAL
+                assignments, course.getCourseId(), TimetableAssignment.AssignmentType.TUTORIAL
         );
         int placedLab = countPlacedHoursForCourseAndType(
-                assignments, course, TimetableAssignment.AssignmentType.LAB
+                assignments, course.getCourseId(), TimetableAssignment.AssignmentType.LAB
         );
 
         int requiredTotal = requiredLecture + requiredTutorial + requiredLab;
@@ -1024,12 +1034,12 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
             completedCourses++;
         } else {
             Map<String, Object> missing = new LinkedHashMap<>();
-            missing.put("courseId", course.getId());
-            missing.put("code", course.getCode());
-            missing.put("name", course.getName());
-            missing.put("semester", course.getSemester());
-            missing.put("studyYear", course.getStudyYear());
-            missing.put("courseType", course.getCourseType() != null ? course.getCourseType().name() : null);
+            missing.put("courseId", course.getCourseId());
+            missing.put("code", course.getSnapshotCourseCode());
+            missing.put("name", course.getSnapshotCourseName());
+            missing.put("semester", course.getSnapshotSemester());
+            missing.put("studyYear", course.getSnapshotStudyYear());
+            missing.put("courseType", course.getSnapshotCourseType());
             missing.put("requiredLecture", requiredLecture);
             missing.put("placedLecture", placedLecture);
             missing.put("requiredTutorial", requiredTutorial);
@@ -1341,37 +1351,34 @@ if (!examTimetable) {
         }
 }
 
-        // 3. Έλεγχος πληρότητας προγράμματος
-List<Course> relevantCourses = courseRepo.findAll()
-        .stream()
-        .filter(course -> isCourseRelevantForTimetable(course, timetable))
-        .toList();
+        // 3. Έλεγχος πληρότητας προγράμματος (#5: από ΠΑΓΩΜΕΝΟ scope, όχι live findAll)
+        List<TimetableScopedCourse> relevantCourses = scopedCoursesFor(timetable);
 
-if (examTimetable) {
-    Set<Long> coursesWithExam = assignments.stream()
-            .filter(assignment -> assignment.getCourse() != null)
-            .filter(assignment -> assignment.getAssignmentType() == TimetableAssignment.AssignmentType.EXAM)
-            .map(assignment -> assignment.getCourse().getId())
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
+        if (examTimetable) {
+            Set<Long> coursesWithExam = assignments.stream()
+                    .filter(assignment -> assignment.getCourse() != null)
+                    .filter(assignment -> assignment.getAssignmentType() == TimetableAssignment.AssignmentType.EXAM)
+                    .map(assignment -> assignment.getCourse().getId())
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
 
-    for (Course course : relevantCourses) {
-        if (course.getId() == null || !coursesWithExam.contains(course.getId())) {
-            warnings.add(validationIssue(
-                    "WARNING",
-                    "MISSING_EXAM",
-                    "Το μάθημα " + course.getName() + " δεν έχει τοποθετημένη εξέταση.",
-                    course.getId()
-            ));
+            for (TimetableScopedCourse course : relevantCourses) {
+                if (course.getCourseId() == null || !coursesWithExam.contains(course.getCourseId())) {
+                    warnings.add(validationIssue("WARNING", "MISSING_EXAM",
+                            "Το μάθημα " + course.getSnapshotCourseName() + " δεν έχει τοποθετημένη εξέταση.",
+                            course.getCourseId()));
+                }
+            }
+        } else {
+            for (TimetableScopedCourse course : relevantCourses) {
+                checkCourseHours(assignments, course.getCourseId(), course.getSnapshotCourseName(),
+                        TimetableAssignment.AssignmentType.LECTURE, course.getReqLectureHours(), warnings, errors);
+                checkCourseHours(assignments, course.getCourseId(), course.getSnapshotCourseName(),
+                        TimetableAssignment.AssignmentType.TUTORIAL, course.getReqTutorialHours(), warnings, errors);
+                checkCourseHours(assignments, course.getCourseId(), course.getSnapshotCourseName(),
+                        TimetableAssignment.AssignmentType.LAB, course.getReqLabHours(), warnings, errors);
+            }
         }
-    }
-} else {
-    for (Course course : relevantCourses) {
-        checkCourseHours(assignments, course, TimetableAssignment.AssignmentType.LECTURE, course.getLectureHours(), warnings, errors);
-        checkCourseHours(assignments, course, TimetableAssignment.AssignmentType.TUTORIAL, course.getTutorialHours(), warnings, errors);
-        checkCourseHours(assignments, course, TimetableAssignment.AssignmentType.LAB, course.getLabHours(), warnings, errors);
-    }
-}
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("valid", errors.isEmpty());
@@ -1390,18 +1397,17 @@ private boolean isExamTimetable(Timetable timetable) {
 }
 
     private boolean isCourseRelevantForTimetable(Course course, Timetable timetable) {
-    if (course == null || timetable == null) return false;
-    if (course.getSemesterType() == null || timetable.getSemesterType() == null) return true;
-    // BOTH courses ανήκουν παντού
-    if (course.getSemesterType().name().equals("BOTH")) return true;
-    // SEPTEMBER timetable περιλαμβάνει όλα τα μαθήματα
-    if (timetable.getSemesterType().name().equals("SEPTEMBER")) return true;
-    return course.getSemesterType().name().equals(timetable.getSemesterType().name());
+        return CourseRelevance.isRelevant(course, timetable);
+    }
+
+    /** #5: τα ΠΑΓΩΜΕΝΑ scoped μαθήματα του προγράμματος (αντί για live findAll). */
+    private List<TimetableScopedCourse> scopedCoursesFor(Timetable timetable) {
+        return scopedCourseRepo.findByTimetableId(timetable.getId());
     }
 
     private int countPlacedHoursForCourseAndType(
             List<TimetableAssignment> assignments,
-            Course course,
+            Long courseId,
             TimetableAssignment.AssignmentType assignmentType) {
 
         int count = 0;
@@ -1411,7 +1417,7 @@ private boolean isExamTimetable(Timetable timetable) {
                 continue;
             }
 
-            boolean sameCourse = assignment.getCourse().getId().equals(course.getId());
+            boolean sameCourse = assignment.getCourse().getId().equals(courseId);
             boolean sameType = assignment.getAssignmentType() == assignmentType;
 
             if (sameCourse && sameType) {
@@ -1424,47 +1430,36 @@ private boolean isExamTimetable(Timetable timetable) {
 
     private void checkCourseHours(
             List<TimetableAssignment> assignments,
-            Course course,
+            Long courseId,
+            String courseName,
             TimetableAssignment.AssignmentType assignmentType,
             int requiredHours,
             List<Map<String, Object>> warnings,
             List<Map<String, Object>> errors) {
 
-        int placedHours = countPlacedHoursForCourseAndType(assignments, course, assignmentType);
+        int placedHours = countPlacedHoursForCourseAndType(assignments, courseId, assignmentType);
 
         if (requiredHours == 0 && placedHours > 0) {
-            errors.add(validationIssue(
-                    "ERROR",
-                    "UNNECESSARY_HOURS",
-                    "Το μάθημα " + course.getName()
-                            + " έχει τοποθετημένες ώρες " + assignmentTypeLabel(assignmentType)
-                            + ", ενώ δεν προβλέπονται.",
-                    course.getId()
-            ));
+            errors.add(validationIssue("ERROR", "UNNECESSARY_HOURS",
+                    "Το μάθημα " + courseName + " έχει τοποθετημένες ώρες "
+                            + assignmentTypeLabel(assignmentType) + ", ενώ δεν προβλέπονται.",
+                    courseId));
             return;
         }
-
         if (placedHours > requiredHours) {
-            errors.add(validationIssue(
-                    "ERROR",
-                    "TOO_MANY_HOURS",
-                    "Το μάθημα " + course.getName()
-                            + " έχει περισσότερες ώρες " + assignmentTypeLabel(assignmentType)
-                            + " από όσες προβλέπονται: " + placedHours + "/" + requiredHours + ".",
-                    course.getId()
-            ));
+            errors.add(validationIssue("ERROR", "TOO_MANY_HOURS",
+                    "Το μάθημα " + courseName + " έχει περισσότερες ώρες "
+                            + assignmentTypeLabel(assignmentType) + " από όσες προβλέπονται: "
+                            + placedHours + "/" + requiredHours + ".",
+                    courseId));
             return;
         }
-
         if (placedHours < requiredHours) {
-            warnings.add(validationIssue(
-                    "WARNING",
-                    "MISSING_HOURS",
-                    "Το μάθημα " + course.getName()
-                            + " έχει έλλειψη ωρών " + assignmentTypeLabel(assignmentType)
-                            + ": " + placedHours + "/" + requiredHours + ".",
-                    course.getId()
-            ));
+            warnings.add(validationIssue("WARNING", "MISSING_HOURS",
+                    "Το μάθημα " + courseName + " έχει έλλειψη ωρών "
+                            + assignmentTypeLabel(assignmentType) + ": "
+                            + placedHours + "/" + requiredHours + ".",
+                    courseId));
         }
     }
 
@@ -1997,7 +1992,7 @@ if (examTimetable
                     continue;
                 }
 
-                int alreadyPlaced = countPlacedHoursForCourseAndType(currentAssignments, course, assignmentType);
+                int alreadyPlaced = countPlacedHoursForCourseAndType(currentAssignments, course.getId(), assignmentType);
                 int remaining = required - alreadyPlaced;
 
                 if (remaining <= 0) {
@@ -2185,7 +2180,7 @@ if (examTimetable
             return reasons;
         }
 
-        int alreadyPlaced = countPlacedHoursForCourseAndType(assignments, course, assignmentType);
+        int alreadyPlaced = countPlacedHoursForCourseAndType(assignments, course.getId(), assignmentType);
         int required = getRequiredHoursForAssignmentType(course, assignmentType);
         if (alreadyPlaced >= required) {
             reasons.add("Οι απαιτούμενες ώρες αυτού του τύπου έχουν ήδη καλυφθεί");
