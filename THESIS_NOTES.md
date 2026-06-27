@@ -716,3 +716,52 @@ Refactors (behavior-preserving): `solverFactoryFor(Timetable, Duration)` extract
 `SolutionAnalysisTest` ×5· *ConstraintProviderTest αμετάβλητα (37+23) → ο refactor δεν
 άλλαξε συμπεριφορά. Full suite 150/151 (το 1 red = προϋπάρχον data-flake
 `TimetableScopeImmutabilityTest`, βλ. BACKLOG [BL-9]).
+
+## Φ-SV2a — Constraint→report-code συμβόλαιο + parity gate
+
+### [5cbf97e] Το maintained συμβόλαιο που καταναλώνει το flip (Φάση 2b)
+Πριν συνδεθεί ο engine Φ-SV1 στο live validation (2b), χρειάζεται μια **ενιαία,
+maintained** αντιστοίχιση `solver constraintName → report code`. Το
+`ConstraintCodeMapping.HARD_NAME_TO_CODE` είναι αυτό το συμβόλαιο — μόνο για τα
+**HARD** constraints (αυτά γίνονται report errors· τα SOFT τα φιλτράρει ήδη το
+`extractHardViolations` με `hardScore() < 0`). Τα ονόματα επαληθεύτηκαν **κατά λέξη**
+από τα `asConstraint(...)` και των δύο providers.
+
+| scope | solver constraintName | report code |
+|---|---|---|
+| WEEKLY | Room conflict | `ROOM_CONFLICT` |
+| WEEKLY | Teacher conflict | `TEACHER_CONFLICT` |
+| WEEKLY | Same course conflict | `SAME_COURSE_SAME_SLOT` |
+| WEEKLY | Required same-year conflict | `REQUIRED_YEAR_CONFLICT` |
+| WEEKLY | Lab must be in LAB room | `LAB_ROOM_REQUIRED` |
+| WEEKLY | First year only in room G | `FIRST_YEAR_ROOM` |
+| WEEKLY | Required courses only in B or G | `REQUIRED_ROOM` |
+| WEEKLY | Daily lecture limit for required courses | `DAILY_LECTURE_LIMIT` |
+| WEEKLY | Lunch break required for first three years | `LUNCH_BREAK_REQUIRED` |
+| WEEKLY | Teacher blocked slot | `TEACHER_BLOCKED` **(NEW)** |
+| WEEKLY | Room blocked slot | `ROOM_BLOCKED` **(NEW)** |
+| EXAM | Exam teacher conflict | `TEACHER_CONFLICT` |
+| EXAM | Required same-year exams on same day | `REQUIRED_YEAR_EXAM_SAME_DATE` |
+| EXAM | Exam room blocked slot | `ROOM_BLOCKED` |
+
+**Τα 2 NEW (`TEACHER_BLOCKED`, `ROOM_BLOCKED`)** είναι ακριβώς οι έλεγχοι που το παλιό
+χειροκίνητο `validateTimetableReport` έχανε: ο engine, διαβάζοντας τα ΙΔΙΑ registries
+με τον solver, τους πιάνει «δωρεάν». Δύο constraintNames μοιράζονται σκόπιμα κοινό
+code (weekly+exam teacher conflict → `TEACHER_CONFLICT`· weekly+exam room blocked →
+`ROOM_BLOCKED`)· τα keys (ονόματα) παραμένουν distinct → `Map.ofEntries` OK.
+
+**Προσοχή — SOFT ≠ error:** το `Direction Group A conflict` (και τα block-cohesion,
+capacity, prefer-hours, gaps κ.λπ.) είναι **SOFT** (`HardSoftScore.ONE_SOFT`) → ΔΕΝ
+χαρτογραφούνται, ΔΕΝ γίνονται errors. Μόνο τα 14 HARD παραπάνω.
+
+**Parity gate (`ValidationEngineParityTest`, no-DB):** (α) completeness **διπλής
+κατεύθυνσης** — κάθε γνωστό hard όνομα έχει code ΚΑΙ καμία ορφανή entry· έτσι «νέο
+HARD constraint χωρίς code» → κόκκινο test (το mapping δεν ξεμένει σιωπηλά πίσω από
+τους providers). (β) 5 σενάρια engine→code μέσω πραγματικού `SolutionManager.explain`
+(2 representative MATCH + 2 NEW + clean) — ο κρίκος violation→code αποδεικνύεται
+ντετερμινιστικά. Ότι «κάθε constraint πυροδοτείται σωστά» καλύπτεται ήδη από τα
+ConstraintVerifier tests (37+23).
+
+**Zero live change:** το mapping ΔΕΝ καλείται από production-flow ακόμη — καταναλώνεται
+μόνο από το test. Το live wiring στο `validateTimetableReport` (+ αφαίρεση των
+διπλο-υλοποιημένων hard checks) είναι η Φάση 2b. Full suite 157/157.
