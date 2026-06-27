@@ -2,8 +2,12 @@ package gr.upatras.ceid.timetable.solver;
 
 import ai.timefold.solver.core.api.solver.SolverFactory;
 import ai.timefold.solver.core.api.solver.Solver;
+import ai.timefold.solver.core.api.solver.SolutionManager;
 import ai.timefold.solver.core.config.solver.SolverConfig;
 import ai.timefold.solver.core.api.score.buildin.hardsoft.HardSoftScore;
+import ai.timefold.solver.core.api.score.ScoreExplanation;
+import ai.timefold.solver.core.api.score.constraint.ConstraintMatch;
+import ai.timefold.solver.core.api.score.constraint.ConstraintMatchTotal;
 import gr.upatras.ceid.timetable.entity.*;
 import gr.upatras.ceid.timetable.entity.TeacherConstraint;
 import gr.upatras.ceid.timetable.entity.RoomConstraint;
@@ -77,17 +81,12 @@ public class SolverService {
             return result;
         }
 
-        // Build and run solver
-        SolverConfig solverConfig = new SolverConfig()
-                .withSolutionClass(CeidTimetable.class)
-                .withEntityClasses(Lesson.class)
-                .withConstraintProviderClass(
-                    timetable.getTimetableType() == Timetable.TimetableType.EXAM
-                        ? ExamConstraintProvider.class
-                        : CeidConstraintProvider.class)
-                .withTerminationSpentLimit(Duration.ofSeconds(timeLimitSeconds));
-
-        SolverFactory<CeidTimetable> solverFactory = SolverFactory.create(solverConfig);
+        // Build and run solver — το SolverConfig/SolverFactory χτίζεται από τον
+        // κοινό helper solverFactoryFor(...), με termination ΜΟΝΟ εδώ (solve path).
+        // Η ανάλυση (analyzeHardViolations) καλεί τον ίδιο helper ΧΩΡΙΣ termination
+        // (μόνο explain, καμία επίλυση).
+        SolverFactory<CeidTimetable> solverFactory =
+                solverFactoryFor(timetable, Duration.ofSeconds(timeLimitSeconds));
         Solver<CeidTimetable> solver = solverFactory.buildSolver();
 
         CeidTimetable problem = new CeidTimetable(solverSlots, solverRooms, lessons);
@@ -98,6 +97,112 @@ public class SolverService {
         // Save results — ΑΤΟΜΙΚΑ σε ξεχωριστό @Transactional bean (S3c/BL-1).
         // Το solve() (πάνω) μένει ΕΚΤΟΣ tx· το early SOLVING save (πάνω) είναι ήδη ξεχωριστό.
         return solutionPersistence.persist(timetable, solution, elapsed);
+    }
+
+    /**
+     * Κοινός helper δημιουργίας SolverFactory (extract από το solve()). Ίδιο config
+     * για επίλυση και ανάλυση: solution class + entity class + ο σωστός
+     * ConstraintProvider (weekly ή exam). Το termination μπαίνει ΜΟΝΟ όταν δοθεί
+     * {@code spentLimit} (solve path)· για explain (spentLimit == null) δεν χρειάζεται
+     * — δεν τρέχει επίλυση. Με non-null spentLimit το παραγόμενο config είναι
+     * ΠΑΝΟΜΟΙΟΤΥΠΟ με το προηγούμενο inline config του solve().
+     */
+    private SolverFactory<CeidTimetable> solverFactoryFor(Timetable tt, Duration spentLimit) {
+        boolean isExam = tt.getTimetableType() == Timetable.TimetableType.EXAM;
+        SolverConfig cfg = new SolverConfig()
+                .withSolutionClass(CeidTimetable.class)
+                .withEntityClasses(Lesson.class)
+                .withConstraintProviderClass(isExam ? ExamConstraintProvider.class
+                                                    : CeidConstraintProvider.class);
+        if (spentLimit != null) {
+            cfg = cfg.withTerminationSpentLimit(spentLimit);
+        }
+        return SolverFactory.create(cfg);
+    }
+
+    /**
+     * Φ-SV1: μηχανή ανάλυσης score-explanation (READ-ONLY, καμία εγγραφή).
+     * Φορτώνει registries/βάρη (mirror του solve), ξαναχτίζει την ΗΔΗ-τοποθετημένη
+     * λύση από τα saved assignments, τρέχει {@code SolutionManager.explain} με τους
+     * ΙΔΙΟΥΣ constraints του solver και επιστρέφει τις HARD παραβιάσεις. Δεν αγγίζει
+     * το live validation path — προορίζεται ως μελλοντική (Φάση 2) μοναδική πηγή
+     * των solver-εκφράσιμων hard errors.
+     */
+    public List<HardViolation> analyzeHardViolations(Long timetableId) {
+        Timetable tt = timetableRepo.findById(timetableId).orElseThrow();
+        loadConstraintsFromDb();                 // ΙΔΙΟ με solve(): registries + SolverWeights overlay
+        List<TimetableAssignment> assignments = assignmentRepo.findByTimetableId(timetableId);
+        CeidTimetable solution = buildPlacedSolution(tt, assignments);
+
+        SolutionManager<CeidTimetable, HardSoftScore> sm =
+                SolutionManager.create(solverFactoryFor(tt, null));
+        ScoreExplanation<CeidTimetable, HardSoftScore> explanation = sm.explain(solution);
+        return extractHardViolations(explanation);
+    }
+
+    /**
+     * Ξαναχτίζει ΤΟΠΟΘΕΤΗΜΕΝΗ λύση από τα saved assignments (live Course, saved
+     * slot/room). {@code Lesson.id := assignment.id} ώστε τα indicted Lessons να
+     * αντιστοιχίζονται πίσω σε assignment ids. Αγνοεί assignments με null
+     * course/room/timeSlot/type (αυτά είναι INVALID_ASSIGNMENT — τα πιάνει το
+     * integrity layer, ΟΧΙ ο solver path).
+     */
+    private CeidTimetable buildPlacedSolution(Timetable tt, List<TimetableAssignment> assignments) {
+        Map<Long, Set<String>> teacherKeyMap = buildTeacherKeyMap();
+        Map<Long, SolverTimeSlot> slotIndex = new LinkedHashMap<>();
+        Map<Long, SolverRoom> roomIndex = new LinkedHashMap<>();
+        List<Lesson> lessons = new ArrayList<>();
+
+        for (TimetableAssignment a : assignments) {
+            if (a.getCourse() == null || a.getRoom() == null || a.getTimeSlot() == null
+                    || a.getAssignmentType() == null) continue;
+            Course c = a.getCourse();
+            Lesson l = new Lesson(
+                    a.getId(), c.getId(), c.getCode(), c.getName(), c.getStudyYear(),
+                    c.getCourseType() != null ? c.getCourseType().name() : "ELECTIVE",
+                    a.getAssignmentType().name(),
+                    c.getExpectedStudents() != null ? c.getExpectedStudents() : 50,
+                    c.getSemesterType() != null ? c.getSemesterType().name() : null,
+                    c.getSemester() != null ? c.getSemester() : 0);
+            l.setTeacherKeys(teacherKeyMap.getOrDefault(c.getId(), Set.of()));
+            // A6 exam prefs (mirror του buildLessons) — αδρανή για weekly.
+            l.setPreferredRoomCodes(parseCsvCodes(c.getPreferredExamRooms()));
+            l.setPreferredStartHours(parseCsvHours(c.getPreferredExamHours()));
+
+            SolverTimeSlot sts = slotIndex.computeIfAbsent(a.getTimeSlot().getId(),
+                    k -> toSolverTimeSlot(a.getTimeSlot()));
+            SolverRoom sr = roomIndex.computeIfAbsent(a.getRoom().getId(),
+                    k -> toSolverRoom(a.getRoom()));
+            l.setTimeSlot(sts);   // ΗΔΗ τοποθετημένο
+            l.setRoom(sr);
+            lessons.add(l);
+        }
+        return new CeidTimetable(new ArrayList<>(slotIndex.values()),
+                                 new ArrayList<>(roomIndex.values()), lessons);
+    }
+
+    /**
+     * PURE (unit-testable χωρίς DB/solver wiring): κρατά μόνο τα ConstraintMatchTotal
+     * με αρνητικό hard impact και μαπάρει τα indicted Lessons σε assignment ids. Κάθε
+     * ConstraintMatch → μία {@link HardViolation}. Package-private static για
+     * στοχευμένο test (precedent: buildTeacherKeyMap/S2).
+     */
+    static List<HardViolation> extractHardViolations(
+            ScoreExplanation<CeidTimetable, HardSoftScore> explanation) {
+        List<HardViolation> out = new ArrayList<>();
+        for (ConstraintMatchTotal<HardSoftScore> cmt :
+                explanation.getConstraintMatchTotalMap().values()) {
+            if (cmt.getScore().hardScore() >= 0) continue;            // μόνο HARD παραβιάσεις
+            for (ConstraintMatch<HardSoftScore> cm : cmt.getConstraintMatchSet()) {
+                List<Long> ids = cm.getIndictedObjectList().stream()
+                        .filter(o -> o instanceof Lesson)
+                        .map(o -> ((Lesson) o).getId())
+                        .distinct().toList();
+                out.add(new HardViolation(cmt.getConstraintRef().constraintName(),
+                                          ids, cm.getScore().hardScore()));
+            }
+        }
+        return out;
     }
 
 private List<SolverTimeSlot> buildSolverTimeSlots(Timetable timetable) {
@@ -137,24 +242,34 @@ private List<SolverTimeSlot> buildSolverTimeSlots(Timetable timetable) {
             }
         }
 
-        int startHour = ts.getStartTime() != null ? ts.getStartTime().getHour() : 9;
-
-        String dayKey;
-        if (ts.getSpecificDate() != null) {
-            dayKey = ts.getSpecificDate().toString();
-        } else {
-            dayKey = ts.getDayOfWeek() != null ? ts.getDayOfWeek().name() : "MONDAY";
-        }
-
-        result.add(new SolverTimeSlot(
-                ts.getId(),
-                ts.getDayOfWeek() != null ? ts.getDayOfWeek().name() : "MONDAY",
-                startHour,
-                dayKey
-        ));
+        // Single source: ίδιος mapper με την ανάλυση (buildPlacedSolution).
+        result.add(toSolverTimeSlot(ts));
     }
 
     return result;
+}
+
+/** Mapper TimeSlot entity → SolverTimeSlot. SINGLE SOURCE: τον μοιράζονται ο builder
+ *  ({@link #buildSolverTimeSlots}) και η ανάλυση ({@link #buildPlacedSolution}) ώστε
+ *  τα κρίσιμα πεδία (dayOfWeek/startHour/dayKey) να παράγονται ΠΑΝΟΜΟΙΟΤΥΠΑ. Για
+ *  semester slots: dayKey = όνομα ημέρας· για exam slots: dayKey = ISO ημερομηνία.
+ *  Package-private static για στοχευμένο parity test. */
+static SolverTimeSlot toSolverTimeSlot(TimeSlot ts) {
+    int startHour = ts.getStartTime() != null ? ts.getStartTime().getHour() : 9;
+
+    String dayKey;
+    if (ts.getSpecificDate() != null) {
+        dayKey = ts.getSpecificDate().toString();
+    } else {
+        dayKey = ts.getDayOfWeek() != null ? ts.getDayOfWeek().name() : "MONDAY";
+    }
+
+    return new SolverTimeSlot(
+            ts.getId(),
+            ts.getDayOfWeek() != null ? ts.getDayOfWeek().name() : "MONDAY",
+            startHour,
+            dayKey
+    );
 }
 
 @Transactional
@@ -234,15 +349,22 @@ private List<SolverRoom> buildSolverRooms(Timetable timetable) {
     List<SolverRoom> result = new ArrayList<>();
 
     for (Room room : sourceRooms) {
-        result.add(new SolverRoom(
-                room.getId(),
-                room.getCode(),
-                room.getCapacity(),
-                room.getRoomType() != null ? room.getRoomType().name() : "CLASSROOM"
-        ));
+        // Single source: ίδιος mapper με την ανάλυση (buildPlacedSolution).
+        result.add(toSolverRoom(room));
     }
 
     return result;
+}
+
+/** Mapper Room entity → SolverRoom. SINGLE SOURCE (βλ. {@link #toSolverTimeSlot}):
+ *  τον μοιράζονται builder ({@link #buildSolverRooms}) και ανάλυση. */
+static SolverRoom toSolverRoom(Room room) {
+    return new SolverRoom(
+            room.getId(),
+            room.getCode(),
+            room.getCapacity(),
+            room.getRoomType() != null ? room.getRoomType().name() : "CLASSROOM"
+    );
 }
 
     private List<Lesson> buildLessons(Timetable timetable) {
