@@ -60,13 +60,17 @@ class TimetableScopeImmutabilityTest {
         Course mine = saveCourse("CREATE_C"); // εγγυάται ≥1 relevant μάθημα (dev ή κενή CI βάση)
         Timetable tt = createViaController("CREATE");
 
-        long expected = courseRepo.findAll().stream()
+        // BL-9 / #4 contract: το freeze (materializeScopeIfAbsent) παγώνει ΜΟΝΟ
+        // μη-διαγραμμένα relevant μαθήματα (findByDeletedFalse). Το expected ΠΡΕΠΕΙ να
+        // χρησιμοποιεί ΑΚΡΙΒΩΣ το ίδιο predicate, αλλιώς soft-deleted relevant μαθήματα
+        // στη dev DB δίνουν ψευδή απόκλιση (findAll: 61 vs frozen: 59).
+        long expected = courseRepo.findByDeletedFalse().stream()
                 .filter(c -> CourseRelevance.isRelevant(c, tt))
                 .count();
         List<TimetableScopedCourse> scoped = scopedCourseRepo.findByTimetableId(tt.getId());
 
         assertEquals(expected, scoped.size(),
-                "freeze-on-create: scope == πλήθος relevant μαθημάτων του καταλόγου");
+                "freeze-on-create: scope == πλήθος μη-διαγραμμένων relevant μαθημάτων του καταλόγου");
         assertTrue(scoped.stream().anyMatch(s -> mine.getId().equals(s.getCourseId())),
                 "το νεοδημιουργημένο πρόγραμμα παγώνει το τρέχον relevant μάθημα");
     }
