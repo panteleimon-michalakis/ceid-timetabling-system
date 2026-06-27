@@ -618,3 +618,44 @@ immunity, new-sees-it, delete-survival, idempotency)· full suite **140/140** π
 **Σχεδιαστική επιλογή:** το course_id στο timetable_scoped_courses είναι χωρίς
 foreign key (denormalized snapshot πεδία) ώστε το ιστορικό scope να επιβιώνει
 ακόμη και σε hard delete μαθήματος. Solver candidate set ανέπαφος.
+
+## Backend — #4 Course soft-delete (Option B / archive)
+
+### [f80480a] Hard delete έσπαγε σιωπηλά → soft-delete flag (V7)
+Το `courseRepo.deleteById` αποτύγχανε σε FK (`course_teachers` **και**
+`timetable_assignments`, NOT NULL χωρίς cascade) αλλά ο controller επέστρεφε 204 →
+**fake-green** στο frontend ενώ το μάθημα έμενε. Λύση Option B: νέο flag `deleted`
+(V7, additive, default false)· το delete θέτει `deleted=true` αντί για hard delete.
+Το μάθημα φεύγει από τον ζωντανό κατάλογο αλλά **η γραμμή μένει** → υπάρχοντα
+προγράμματα το κρατούν ακέραιο (S3 snapshot = display, #5 frozen scope =
+membership). Έτσι «διαγράφεις οποιοδήποτε μάθημα» χωρίς να σπάσεις προγράμματα όπου
+χρησιμοποιήθηκε.
+
+### [f80480a] Κρίσιμη safety επιλογή — ΟΧΙ global @SQLRestriction/@Where στο Course
+Το `TimetableAssignment` έχει **EAGER** `@ManyToOne Course` και πολλά paths καλούν
+`assignment.getCourse().getId()`. Global filter θα γύριζε `course=null` για
+αναθέσεις soft-deleted μαθημάτων → θα **έσπαγε υπάρχοντα προγράμματα**. Γι' αυτό
+φιλτράρουμε **μόνο** τις live-catalog επιφάνειες μέσω deleted-aware derived queries
+(`findByDeletedFalse[...]`): listing (`CourseController`), solver candidate set +
+teacher-key fallback (`SolverService`), auto-schedule (`TimetableController`),
+teacher import (`TeacherImportService`), `GET /teachers/{id}/courses`
+(skip-in-loop). Το `findById`/association resolution μένει **ΑΦΙΛΤΡΑΡΙΣΤΟ** — το
+κλειδώνει το test `existingTimetable_keepsCourseIntactAfterDelete` (η ανάθεση
+εξακολουθεί να resolves το soft-deleted course).
+
+### [f80480a] Απόκλιση από το spec file-list: TimetableScopeService (scope νέων προγραμμάτων)
+Ο στόχος (#1) ορίζει ρητά «scope νέων προγραμμάτων» ως live-catalog surface, και το
+acceptance test #4 («excluded from new scope») το απαιτεί — αλλά το αρχικό
+file-list του prompt δεν περιλάμβανε το `TimetableScopeService`. Η
+`materializeScopeIfAbsent` (write/freeze path) άλλαξε `findAll()` →
+`findByDeletedFalse()` ώστε νέα προγράμματα να μην παγώνουν deleted μαθήματα. Το
+`scopedCoursesFor` (read) + τα completeness paths (#5) **δεν** αγγίχτηκαν → υπάρχοντα
+frozen scopes ανέπαφα.
+
+### [f80480a] Κλειδωμένες αποφάσεις & tests
+Μόνιμοι κωδικοί: το `courses.code` παραμένει unique· soft-deleted μάθημα κρατάει τον
+κωδικό του (καμία αλλαγή σε unique constraint/`findByCode`). Restore/«εμφάνιση
+διαγραμμένων» = future feature (εκτός scope). Tests: `CourseSoftDeleteTest` ×6
+(soft-not-hard, hidden-from-catalog, resolvable-by-id, excluded-from-new-scope,
+existing-timetable-intact, teacher-view-excludes)· full suite **146/146** πράσινα·
+frontend `npm run build` πράσινο (confirm copy: «το μάθημα θα αποσυρθεί…»).
