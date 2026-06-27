@@ -96,19 +96,21 @@ function TimetableCard({ t, stat, to, isAdmin, onPublish, onUnpublish }: {
   const sc       = STATUS_CONFIG[status] ?? STATUS_CONFIG.DRAFT;
   const isPublished = status === 'PUBLISHED';
 
-  // ── Κανόνας δημοσίευσης ─────────────────────────────────────────────
-  // Μόνη απαίτηση: 0 hard errors. Ο βαθμός πληρότητας δεν μπλοκάρει
-  // τη δημοσίευση — κάποια προγράμματα μπορεί να είναι μερικώς
-  // συμπληρωμένα και αυτό είναι επιλογή του ADMIN.
-  const canPublish = !stat || stat.errorCount === 0;
-
-  const publishBlockReason = (!canPublish && stat)
-    ? `${stat.errorCount} hard errors — διόρθωσε πριν δημοσιεύσεις`
-    : '';
+  // #3 publish-anything: η δημοσίευση επιτρέπεται ΠΑΝΤΑ. Τα errors δεν μπλοκάρουν —
+  // απλώς απαιτούν ρητή επιβεβαίωση (συνειδητή επιλογή του ADMIN).
+  const hasErrors = !!(stat && stat.errorCount > 0);
 
   async function handleAction(e: React.MouseEvent, action: 'publish' | 'unpublish') {
     e.preventDefault();
     e.stopPropagation();
+    if (action === 'publish' && hasErrors && stat) {
+      const ok = confirm(
+        `Το πρόγραμμα έχει ${stat.errorCount} σφάλματα` +
+        (stat.warningCount ? ` και ${stat.warningCount} προειδοποιήσεις` : '') +
+        `.\nΝα δημοσιευτεί παρ' όλα αυτά; Θα γίνει ορατό στους φοιτητές.`
+      );
+      if (!ok) return;
+    }
     setActionLoading(true);
     try {
       if (action === 'publish') await onPublish();
@@ -221,20 +223,22 @@ function TimetableCard({ t, stat, to, isAdmin, onPublish, onUnpublish }: {
           ) : (
             <button
               onClick={e => handleAction(e, 'publish')}
-              disabled={actionLoading || !canPublish}
-              title={!canPublish ? publishBlockReason : 'Δημοσίευση — θα γίνει ορατό σε φοιτητές'}
+              disabled={actionLoading}
+              title={hasErrors
+                ? `Δημοσίευση με ${stat?.errorCount} σφάλματα — θα ζητηθεί επιβεβαίωση`
+                : 'Δημοσίευση — θα γίνει ορατό σε φοιτητές'}
               style={{
-                width: '100%', padding: '6px', border: `1px solid ${canPublish ? '#064e3b' : '#1a2744'}`,
-                borderRadius: 6, background: canPublish ? '#052e16' : '#0d1b2e',
-                color: canPublish ? '#4ade80' : '#334155',
+                width: '100%', padding: '6px', border: `1px solid ${hasErrors ? '#92400e' : '#064e3b'}`,
+                borderRadius: 6, background: hasErrors ? '#3a2a0a' : '#052e16',
+                color: hasErrors ? '#fbbf24' : '#4ade80',
                 fontSize: 11, fontWeight: 600,
-                cursor: (!canPublish || actionLoading) ? 'not-allowed' : 'pointer',
+                cursor: actionLoading ? 'not-allowed' : 'pointer',
                 fontFamily: "'IBM Plex Sans', sans-serif",
-                opacity: (actionLoading || !canPublish) ? 0.5 : 1,
+                opacity: actionLoading ? 0.5 : 1,
                 transition: 'opacity 0.15s',
               }}
             >
-              {actionLoading ? '...' : canPublish ? '↑ Δημοσίευση' : '🔒 Μη έτοιμο'}
+              {actionLoading ? '...' : hasErrors ? '⚠ Δημοσίευση με σφάλματα' : '↑ Δημοσίευση'}
             </button>
           )}
         </div>
@@ -291,8 +295,12 @@ export default function Dashboard() {
   useEffect(() => { loadAll(); }, []);
 
   async function handlePublish(id: number) {
-    await timetableService.publish(id);
-    loadAll();
+    try {
+      await timetableService.publish(id);
+      loadAll();
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? 'Αποτυχία δημοσίευσης.');
+    }
   }
 
   async function handleUnpublish(id: number) {
