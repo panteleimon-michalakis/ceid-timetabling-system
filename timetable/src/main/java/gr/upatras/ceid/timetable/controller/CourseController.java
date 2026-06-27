@@ -42,7 +42,7 @@ public class CourseController {
 
     @GetMapping
     public List<Map<String, Object>> getAll() {
-        return courseRepo.findAll(COURSE_SORT).stream()
+        return courseRepo.findByDeletedFalse(COURSE_SORT).stream()
                 .map(this::courseToDto)
                 .toList();
     }
@@ -56,28 +56,28 @@ public class CourseController {
 
     @GetMapping("/semester/{semester}")
     public List<Map<String, Object>> getBySemester(@PathVariable Integer semester) {
-        return courseRepo.findBySemesterAndActiveTrue(semester, COURSE_SORT).stream()
+        return courseRepo.findBySemesterAndActiveTrueAndDeletedFalse(semester, COURSE_SORT).stream()
                 .map(this::courseToDto)
                 .toList();
     }
 
     @GetMapping("/year/{year}")
     public List<Map<String, Object>> getByYear(@PathVariable Integer year) {
-        return courseRepo.findByStudyYear(year, COURSE_SORT).stream()
+        return courseRepo.findByStudyYearAndDeletedFalse(year, COURSE_SORT).stream()
                 .map(this::courseToDto)
                 .toList();
     }
 
     @GetMapping("/type/{type}")
     public List<Map<String, Object>> getByType(@PathVariable Course.CourseType type) {
-        return courseRepo.findByCourseType(type, COURSE_SORT).stream()
+        return courseRepo.findByCourseTypeAndDeletedFalse(type, COURSE_SORT).stream()
                 .map(this::courseToDto)
                 .toList();
     }
 
     @GetMapping("/active")
     public List<Map<String, Object>> getActive() {
-        return courseRepo.findByActiveTrue(COURSE_SORT).stream()
+        return courseRepo.findByActiveTrueAndDeletedFalse(COURSE_SORT).stream()
                 .map(this::courseToDto)
                 .toList();
     }
@@ -119,12 +119,15 @@ public class CourseController {
     }
 
     @DeleteMapping("/{id}")
+    @Transactional
     public ResponseEntity<Void> delete(@PathVariable Long id) {
-        if (courseRepo.existsById(id)) {
-            courseRepo.deleteById(id);
-            return ResponseEntity.noContent().build();
-        }
-        return ResponseEntity.notFound().build();
+        return courseRepo.findById(id)
+                .map(course -> {
+                    course.setDeleted(true);
+                    courseRepo.save(course);
+                    return ResponseEntity.noContent().<Void>build();
+                })
+                .orElse(ResponseEntity.notFound().build());
     }
 
     // ── Teacher M2M sync (course_teachers = source-of-truth, teachersText derived) ──

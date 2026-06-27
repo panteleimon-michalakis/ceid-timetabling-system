@@ -34,7 +34,7 @@ public class TeacherImportService {
 
     @Transactional
     public Map<String, Object> importFromCourseTeacherTexts() {
-        List<Course> courses = courseRepo.findAll();
+        List<Course> courses = courseRepo.findByDeletedFalse();
 
         int createdTeachers = 0;
         int createdRelations = 0;

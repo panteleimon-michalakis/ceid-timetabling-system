@@ -19,4 +19,12 @@ public interface CourseRepository extends JpaRepository<Course, Long> {
     List<Course> findByVisibleInTimetableTrue();
     List<Course> findByStudyYear(Integer studyYear);
     List<Course> findByStudyYear(Integer studyYear, Sort sort);
+
+    // #4 soft-delete: live-catalog reads εξαιρούν τα deleted μαθήματα.
+    List<Course> findByDeletedFalse();
+    List<Course> findByDeletedFalse(Sort sort);
+    List<Course> findBySemesterAndActiveTrueAndDeletedFalse(Integer semester, Sort sort);
+    List<Course> findByStudyYearAndDeletedFalse(Integer studyYear, Sort sort);
+    List<Course> findByCourseTypeAndDeletedFalse(Course.CourseType courseType, Sort sort);
+    List<Course> findByActiveTrueAndDeletedFalse(Sort sort);
 }

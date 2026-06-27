@@ -248,7 +248,7 @@ private List<SolverRoom> buildSolverRooms(Timetable timetable) {
     private List<Lesson> buildLessons(Timetable timetable) {
         Map<Long, Set<String>> teacherKeyMap = buildTeacherKeyMap();
 
-        List<Course> courses = courseRepo.findAll().stream()
+        List<Course> courses = courseRepo.findByDeletedFalse().stream()
                 .filter(c -> isCourseRelevant(c, timetable))
                 .toList();
 
@@ -402,7 +402,7 @@ Map<Long, Set<String>> buildTeacherKeyMap() {
     }
 
     // Fallback (deprecated): teachers_text ΜΟΝΟ για μαθήματα χωρίς M2M rows.
-    for (Course course : courseRepo.findAll()) {
+    for (Course course : courseRepo.findByDeletedFalse()) {
         if (coursesWithM2M.contains(course.getId())) continue;
         if (course.getTeachersText() == null || course.getTeachersText().isBlank()) continue;
 

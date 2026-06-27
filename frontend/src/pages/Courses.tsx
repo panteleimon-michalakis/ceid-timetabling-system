@@ -290,7 +290,7 @@ export default function Courses() {
   }, [toast]);
 
   async function handleDelete(c: Course) {
-    if (!confirm(`Διαγραφή μαθήματος "${c.name}";\nΠροσοχή: θα διαγραφούν και οι αναθέσεις του.`)) return;
+    if (!confirm(`Διαγραφή μαθήματος "${c.name}";\nΤο μάθημα θα αποσυρθεί από τον κατάλογο. Τα προγράμματα όπου έχει ήδη χρησιμοποιηθεί δεν επηρεάζονται.`)) return;
     try {
       await courseService.delete(c.id);
       setToast('Το μάθημα διαγράφηκε.');

@@ -1950,7 +1950,7 @@ if (examTimetable
 
         Timetable timetable = timetableOpt.get();
 
-        List<Course> allCourses = courseRepo.findAll().stream()
+        List<Course> allCourses = courseRepo.findByDeletedFalse().stream()
                 .filter(course -> isCourseRelevantForTimetable(course, timetable))
                 .filter(course -> autoTotalCourseHours(course) > 0)
                 .sorted(courseSchedulingPriority())

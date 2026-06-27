@@ -167,6 +167,7 @@ public class TeacherController {
         List<CourseTeacher> relations = courseTeacherRepo.findByTeacherId(id);
         List<Map<String, Object>> result = new ArrayList<>();
         for (CourseTeacher ct : relations) {
+            if (ct.getCourse() == null || Boolean.TRUE.equals(ct.getCourse().getDeleted())) continue; // #4: hide soft-deleted
             Map<String, Object> dto = new LinkedHashMap<>();
             dto.put("courseId",   ct.getCourse().getId());
             dto.put("courseCode", ct.getCourse().getCode());

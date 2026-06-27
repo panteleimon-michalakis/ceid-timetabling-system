@@ -86,6 +86,12 @@ public class Course {
     @Column(name = "visible_in_timetable", nullable = false)
     private Boolean visibleInTimetable;
 
+    // #4 soft-delete: true = αποσυρμένο από τον ζωντανό κατάλογο (η γραμμή μένει
+    // ώστε υπάρχοντα προγράμματα να το κρατούν ακέραιο μέσω snapshot + frozen scope).
+    @Column(name = "deleted", nullable = false)
+    @Builder.Default
+    private Boolean deleted = false;
+
     // A6: Προτιμήσεις εξεταστικής από τις φόρμες διδασκόντων.
     // CSV κωδικών αιθουσών (π.χ. "Β,Δ1") και ωρών έναρξης (π.χ. "9,12").
     @Column(length = 200)
