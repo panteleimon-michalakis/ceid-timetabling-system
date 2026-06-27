@@ -212,3 +212,16 @@ diff τα δύο αντίγραφα** (μπορεί να έχουν αποκλί
 από το characterization test (`TeacherDisplayTextTest` case #9). Λύση: idempotent
 replace (word-boundary/regex ή guard «αν ήδη …ς»). Impact: 1 όνομα, καθαρά εμφανισιακό
 (όχι solver/data). Tier: 🟢 Sonnet.
+
+**[BL-9] TimetableScopeImmutabilityTest 61-vs-59 — δυνητική απόκλιση freeze-logic ↔ CourseRelevance (από Φ-SV1)**
+Το `create_freezesScopeToRelevantCatalog` αποτυγχάνει σε **local dev DB** (expected 61
+live vs 59 frozen): η μέτρηση `CourseRelevance.isRelevant` (test) ταξινομεί 2 μαθήματα
+ως relevant που το freeze path (`TimetableScopeService.materializeScopeIfAbsent`) ΔΕΝ
+πάγωσε. **Προϋπάρχον & εκτός scope Φ-SV1**: αναπαράγεται πανομοιότυπα σε καθαρό HEAD
+d662301 (stash proof) — όχι regression από τη μηχανή ανάλυσης· data-dependent (το ίδιο
+το test λέει «dev ή κενή CI βάση» → σε καθαρή/seeded DB περνά). Αγγίζει το **invariant
+#1** (snapshot/scope immutability): αν η απόκλιση είναι αληθινό bug, το freeze και η
+live-relevance πρέπει να συμφωνούν· αλλιώς είναι απλώς drifted dev data. Λύση: diff των
+δύο relevance ορισμών (freeze path vs `CourseRelevance.isRelevant`), εντόπισε τα 2
+μαθήματα, αποφάσισε ποιος ορισμός είναι authoritative. Διερεύνηση ΩΣ ΔΙΚΟ ΤΗΣ ΘΕΜΑ
+(όχι scope-creep στο 🔴 Φ-SV1). Tier: 🟣/🔵.
