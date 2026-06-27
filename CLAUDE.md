@@ -225,3 +225,18 @@ live-relevance πρέπει να συμφωνούν· αλλιώς είναι α
 δύο relevance ορισμών (freeze path vs `CourseRelevance.isRelevant`), εντόπισε τα 2
 μαθήματα, αποφάσισε ποιος ορισμός είναι authoritative. Διερεύνηση ΩΣ ΔΙΚΟ ΤΗΣ ΘΕΜΑ
 (όχι scope-creep στο 🔴 Φ-SV1). Tier: 🟣/🔵.
+
+**RESOLVED (d1a9b71):** test-only brittleness, ΟΧΙ production bug. Το freeze
+(`findByDeletedFalse`) είναι σωστό κατά το #4 contract· το test μετρούσε με `findAll()`
+(συμπεριλάμβανε 2 soft-deleted relevant της dev DB). Fix: recount με `findByDeletedFalse()`
+→ match by construction. Η παράλληλη active/visible απόκλιση → [BL-10].
+
+**[BL-10] Δύο ορισμοί relevance — scope-freeze (semester-only) vs solver (semester + active + visibleInTimetable)**
+Το `TimetableScopeService.materializeScopeIfAbsent` παγώνει με `CourseRelevance.isRelevant`
+(semester-only), ενώ ο solver (`SolverService.isCourseRelevant`) φιλτράρει ΕΠΙΠΛΕΟΝ
+`active=false` και `visibleInTimetable=false`. Συνέπεια: μη-διαγραμμένο, semester-relevant
+μάθημα με `active=false` ή `visibleInTimetable=false` («σε συνεννόηση») ΠΑΓΩΝΕΙ στο scope (το
+completeness περιμένει ώρες του) αλλά ο solver ΔΕΝ το προγραμματίζει ποτέ → δυνητικά phantom
+MISSING_HOURS. Ξεχωριστή απόκλιση από BL-9 (ΔΕΝ προκαλεί το 61-vs-59 — καμία πλευρά του test
+δεν φιλτράρει active/visible). Δένει με τη Φάση 2 (solver↔validation unification). Λύση:
+ενοποίηση των δύο relevance ορισμών σε μία authoritative πηγή. Tier: 🔵.
