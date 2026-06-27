@@ -659,3 +659,22 @@ frozen scopes ανέπαφα.
 (soft-not-hard, hidden-from-catalog, resolvable-by-id, excluded-from-new-scope,
 existing-timetable-intact, teacher-view-excludes)· full suite **146/146** πράσινα·
 frontend `npm run build` πράσινο (confirm copy: «το μάθημα θα αποσυρθεί…»).
+
+## Frontend — #3 Publish-anything (Option A, με confirmation)
+
+### [3168705] Frontend-only gate → publish-anything με ρητή επιβεβαίωση
+Ο gate δημοσίευσης ήταν **καθαρά frontend** (`Dashboard.tsx`: `canPublish =
+errorCount === 0` → κουμπί «🔒 Μη έτοιμο»)· ο backend `publish()` **δεν** μπλοκάρει
+σε errors (ελέγχει μόνο «μη κενό SEMESTER» → 400). Option A: η δημοσίευση
+επιτρέπεται **πάντα**, αλλά με errors (α) το κουμπί γίνεται amber «⚠ Δημοσίευση με
+σφάλματα» και (β) `confirm()` με τα πλήθη errors/warnings πριν την κλήση → ο admin
+δημοσιεύει **συνειδητά**. Αντικατοπτρίζει τη φιλοσοφία «validation = advisory, όχι
+hard gate» (κάποια προγράμματα είναι σκόπιμα μερικώς συμπληρωμένα — επιλογή του
+ADMIN). Μηδέν backend/solver risk: καμία αλλαγή στον `TimetableController.publish()`.
+
+### [3168705] Graceful surfacing του backend 400
+Με το κουμπί πλέον ξεκλείδωτο, το backend 400 (κενό SEMESTER) γίνεται προσβάσιμο·
+ο `handlePublish` το πιάνει (try/catch) και δείχνει το μήνυμα του server αντί να
+σκάει σιωπηλά. Ο backend έλεγχος «μη κενό SEMESTER» **δεν** αφαιρέθηκε — απλώς
+surfac-άρεται. Frontend-only αλλαγή (ένα αρχείο)· `npm run build` πράσινο, χωρίς
+automated test (UI-only gate change).
