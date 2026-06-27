@@ -678,3 +678,41 @@ ADMIN). Μηδέν backend/solver risk: καμία αλλαγή στον `Timeta
 σκάει σιωπηλά. Ο backend έλεγχος «μη κενό SEMESTER» **δεν** αφαιρέθηκε — απλώς
 surfac-άρεται. Frontend-only αλλαγή (ένα αρχείο)· `npm run build` πράσινο, χωρίς
 automated test (UI-only gate change).
+
+## Φ-SV1 — Μηχανή ανάλυσης score-explanation (read-only)
+
+### [567e487] Δύο κόσμοι, μία πηγή αλήθειας: solver↔validation
+Το σύστημα έχει **δύο κόσμους**: JPA entities (storage) και solver POJOs (compute).
+Μέχρι τώρα οι hard έλεγχοι εγκυρότητας ενός αποθηκευμένου προγράμματος ήταν
+**διπλο-υλοποιημένοι**: ο solver επέβαλλε τους constraints κατά την επίλυση, ενώ το
+`validateTimetableReport` ξανα-υλοποιούσε χειροκίνητα μερικούς από αυτούς για το UI
+— με αναπόφευκτη απόκλιση (constraints που ο solver «βλέπει» αλλά το report έχανε).
+
+Η μηχανή Φ-SV1 (`SolverService.analyzeHardViolations`) κλείνει **δομικά** την
+απόκλιση: για ένα αποθηκευμένο timetable ξαναχτίζει την **ήδη-τοποθετημένη** λύση από
+τα saved assignments (live Course + saved slot/room, `Lesson.id := assignment.id`),
+φορτώνει τα ΙΔΙΑ registries/βάρη με το solve, και τρέχει το Timefold
+`SolutionManager.explain` πάνω στους **ΙΔΙΟΥΣ** ConstraintProviders. Έτσι το
+«hardScore 0 ⇔ μηδέν solver-εκφράσιμα errors» γίνεται αληθές ΕΚ ΚΑΤΑΣΚΕΥΗΣ — μία
+πηγή αλήθειας αντί για δύο.
+
+Απόδειξη ότι πιάνει ό,τι έχανε το παλιό report: τα tests `teacherBlockedSlot`/
+`roomBlockedSlot` (ακριβώς δύο από τα σημερινά MISSING του report) επιστρέφουν τώρα
+κανονική HardViolation. Ο extractor (`extractHardViolations`) είναι **pure**
+(unit-testable χωρίς DB/solver wiring): κρατά μόνο τα ConstraintMatchTotal με
+αρνητικό hard impact και μαπάρει τα indicted Lessons → assignment ids.
+
+**Read-only & εκτός live path:** η Φάση 1 ΔΕΝ αγγίζει το `validateTimetableReport`
+ούτε controller/endpoint — μηδενική αλλαγή σε live συμπεριφορά. Είναι το θεμέλιο για
+(α) τη Φάση 2 (σύνδεση στο validation + αφαίρεση των διπλο-υλοποιημένων hard checks)
+και (β) το μελλοντικό **DB-driven γενικευμένο Constraint model** (invariant #4):
+μόλις οι κανόνες διαβάζονται από τη ΒΔ, ο ίδιος explain-μηχανισμός παράγει τα
+structured reasons για το κόκκινο UI.
+
+Refactors (behavior-preserving): `solverFactoryFor(Timetable, Duration)` extract από
+το solve() (termination ΜΟΝΟ στο solve path· η ανάλυση καλεί με null — μόνο explain)·
+`toSolverTimeSlot`/`toSolverRoom` single-source mappers που μοιράζονται builder &
+ανάλυση (parity by construction, pinned από mapper-parity test). Tests:
+`SolutionAnalysisTest` ×5· *ConstraintProviderTest αμετάβλητα (37+23) → ο refactor δεν
+άλλαξε συμπεριφορά. Full suite 150/151 (το 1 red = προϋπάρχον data-flake
+`TimetableScopeImmutabilityTest`, βλ. BACKLOG [BL-9]).
