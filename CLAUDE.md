@@ -240,3 +240,11 @@ completeness περιμένει ώρες του) αλλά ο solver ΔΕΝ το 
 MISSING_HOURS. Ξεχωριστή απόκλιση από BL-9 (ΔΕΝ προκαλεί το 61-vs-59 — καμία πλευρά του test
 δεν φιλτράρει active/visible). Δένει με τη Φάση 2 (solver↔validation unification). Λύση:
 ενοποίηση των δύο relevance ορισμών σε μία authoritative πηγή. Tier: 🔵.
+
+**[BL-11] Snapshot-first hard validation (πλήρης immutability παλιών προγραμμάτων)**
+Οι hard checks (report ΚΑΙ μηχανή Φ-SV1) διαβάζουν live `assignment.getCourse()`. Άρα
+επεξεργασία μαθήματος μπορεί να αλλάξει τη hard-validation παλιού (παγωμένου) προγράμματος.
+ΠΡΟΫΠΑΡΧΟΝ (όχι 2b regression). Τα 16 snapshot columns καλύπτουν ΟΛΑ τα constraint inputs
+(course_type/study_year/teachers_text/room_type/...), άρα snapshot-first `buildPlacedSolution`
+είναι εφικτό → πλήρης immutability συνεπής με το putSnapshotFirst render rule. Σκόπιμη
+μελλοντική απόφαση· δένει με future DB-driven constraints. Tier: 🔵.
