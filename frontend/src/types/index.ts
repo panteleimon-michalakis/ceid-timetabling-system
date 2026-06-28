@@ -184,6 +184,9 @@ export interface ValidationIssue {
   code: string;
   message: string;
   referenceId: number | null;
+  // Φ-SV2b-ii-β2: engine-derived issues μεταφέρουν και όλα τα εμπλεκόμενα assignment ids
+  // (additive· τα χειρόγραφα integrity issues δεν το έχουν). Δεν χρησιμοποιείται ακόμη.
+  assignmentIds?: number[];
 }
 
 export interface TimetableValidationReport {
