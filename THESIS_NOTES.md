@@ -765,3 +765,43 @@ ConstraintVerifier tests (37+23).
 **Zero live change:** το mapping ΔΕΝ καλείται από production-flow ακόμη — καταναλώνεται
 μόνο από το test. Το live wiring στο `validateTimetableReport` (+ αφαίρεση των
 διπλο-υλοποιημένων hard checks) είναι η Φάση 2b. Full suite 157/157.
+
+## Φ-SV2b-i — HardViolation → report-issue translator + message contract
+
+### [27aff61] Ο μετατροπέας violation → issue (additive, zero live wiring)
+Πριν το flip (2b-ii), ο κρίκος «engine → report» χρειάζεται έναν ντετερμινιστικό
+μετατροπέα. Ο `HardViolationTranslator.translate(List<HardViolation>, lookup)` παράγει
+report issues `{code, referenceId, assignmentIds, message}`. Το «μυστικό» της
+unit-testability είναι το **decoupling από το JPA**: αντί να δέχεται live
+`TimetableAssignment`, δέχεται `Function<Long, AssignmentView> lookup` — ένα ελαφρύ
+record με ΜΟΝΟ τα display πεδία (course/year/room/day/hour/teachers/type). Ο live
+adapter `TimetableAssignment → AssignmentView` είναι η Φάση 2b-ii· εδώ ο translator
+δοκιμάζεται με synthetic lookup, πλήρως no-DB.
+
+**Αποφάσεις:**
+- **D1 (referenceId — ακριβής διατήρηση σημερινής σημασιολογίας):** aggregate codes
+  (`DAILY_LECTURE_LIMIT`, `LUNCH_BREAK_REQUIRED`) → `null`· όλα τα υπόλοιπα →
+  `min(assignmentIds)` (ascending sort για ντετερμινισμό, mirror του παλιού «a=πρώτο»).
+  Επιπλέον πάντα **additive** πεδίο `assignmentIds` (sorted) — νέο, δεν χαλάει το παλιό.
+- **D2:** τα 2 NEW (`TEACHER_BLOCKED`, `ROOM_BLOCKED`) με δικά τους μηνύματα + ώρα
+  (ελληνική ημέρα + `HH:00`) — ακριβώς ό,τι έχανε το χειρόγραφο report.
+- **D3:** στο `TEACHER_CONFLICT` το όνομα του διδάσκοντα = **τομή** των teacherNames των
+  δύο μαθημάτων· κενή τομή (ακραία keys-vs-names) → fallback «κοινός διδάσκων». Η
+  ΑΠΟΦΑΣΗ της σύγκρουσης ανήκει στη μηχανή (teacherKeys)· εδώ μόνο display.
+
+### [27aff61] Εύρημα: τα aggregate constraints indict μόνο το group-key
+Υποχρεωτικό probe (πριν το message-building): τα group-by constraints «Daily lecture
+limit» και «Lunch break» indict ΜΟΝΟ το **group-key** ως raw `[Integer studyYear,
+String day, Integer count]` — **κανένα `Lesson`**. Συνέπεια στην αλυσίδα Φ-SV1:
+`extractHardViolations` (φιλτράρει `o instanceof Lesson`) δίνει **ΚΕΝΟ `assignmentIds`**
+για αυτά, και αφού το `HardViolation` record δεν μεταφέρει το group-key, ο translator
+**δεν έχει κανένα view** για άντληση year/day/N → **generic μήνυμα** (documented
+fallback). Πρακτικά: τα 2 aggregate μηνύματα είναι ελαφρώς **λιγότερο πλούσια** από το
+σημερινό χειρόγραφο report (που τυπώνει έτος/ημέρα/N). Απόφαση για 2b-ii: είτε (α)
+διατήρηση των χειρόγραφων ελέγχων ΜΟΝΟ γι' αυτά τα 2 aggregates, είτε (β) επέκταση του
+`HardViolation`/`extractHardViolations` ώστε να μεταφέρει το group-key — δένει με το
+μελλοντικό DB-driven Constraint model. Τα 12 placement/pairwise codes (incl. 2 NEW)
+δεν επηρεάζονται: indict κανονικά Lessons → πλήρη μηνύματα.
+
+Zero live change: full suite 169/169 (157 baseline + 12 νέα translator tests). Το live
+wiring στο `validateTimetableReport` + αφαίρεση χειρόγραφων hard checks = Φάση 2b-ii.
