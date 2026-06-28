@@ -861,3 +861,41 @@ engine). Ο translator κάνει την τομή για το `TEACHER_CONFLICT`
 (καμία issue). **Τα 2 νέα blocked errors επιβεβαιώθηκαν σε πραγματικά seeded δεδομένα**
 (TeacherConstraint/RoomConstraint → loadConstraintsFromDb → engine), δηλαδή ό,τι έχανε
 το παλιό report παράγεται τώρα από τη μηχανή. Full suite 179/179, μηδέν live αλλαγή.
+
+## Φ-SV2b-ii-β2 — THE FLIP: ο engine ως μοναδική πηγή αλήθειας (ολοκλήρωση Option C)
+
+### [916f3dd] Ενοποίηση solver↔validation: τέλος της διπλο-υλοποίησης
+Το `validateTimetableReport` παράγει πλέον ΟΛΑ τα hard errors ΑΠΟΚΛΕΙΣΤΙΚΑ από τη μηχανή
+(`ValidationEngineService.analyzeHardIssues` → `SolverService.analyzeHardViolations` →
+`HardViolationTranslator`). Αφαιρέθηκαν οι χειρόγραφοι έλεγχοι που έκαναν ό,τι ήδη κάνει
+ο solver: room/teacher/same-course/required-year conflicts, lab/first-year/required room
+rules, daily-lecture-limit, lunch-break. **Αποτέλεσμα — εκ κατασκευής: `hardScore 0 ⇔
+μηδέν hard validation errors`.** Κλείνει η σειρά Φ-SV (Option C unification): οι «δύο
+κόσμοι» (solver compute vs validation report) έχουν τώρα ΜΙΑ πηγή για τους hard κανόνες.
+
+**Τα 2 πρώην-MISSING εμφανίζονται πλέον:** `TEACHER_BLOCKED` και `ROOM_BLOCKED` — ο
+χειρόγραφος report ποτέ δεν τα είχε (ο solver τα είχε πάντα). Τώρα ο φοιτητής/admin τα
+βλέπει με σωστό μήνυμα (ημέρα/ώρα) και highlight (ASSIGNMENT_SCOPED στο UI, και τα δύο
+weekly+exam).
+
+**Τι ΕΜΕΙΝΕ χειρόγραφο (integrity layer — ο solver δεν το εκφράζει):**
+`INVALID_ASSIGNMENT`, `SEMESTER_MISMATCH`, completeness (`MISSING_HOURS`/`TOO_MANY_HOURS`/
+`UNNECESSARY_HOURS`/`MISSING_EXAM` από ΠΑΓΩΜΕΝΟ scope), advisory `SHARED_EXAM_ROOM`.
+Διαχωρισμός αρχής: ο solver κρίνει «έγκυρη τοποθέτηση»· το integrity layer κρίνει
+«ακεραιότητα/πληρότητα δεδομένων» (πράγματα εκτός του μοντέλου του solver).
+
+**Immutability ανέπαφη:** Option L (ο adapter διαβάζει live course/room/teachers) → ΙΔΙΑ
+δεδομένα με τον προηγούμενο report, μηδέν αλλαγή σημασιολογίας· η πληρότητα διαβάζει ακόμη
+το frozen `TimetableScopedCourse` scope (invariant #1). Tests επιβεβαιώνουν: νέο μάθημα
+μετά το freeze ΔΕΝ διαρρέει σε παλιό πρόγραμμα· soft-deleted μάθημα εξακολουθεί να
+επικυρώνεται. (Πλήρες snapshot-first hard validation = μελλοντικό BL-11.)
+
+**Έτοιμο για future DB-driven constraints:** ο engine είναι constraint-agnostic (εξάγει
+Lessons + raw group-key facts χωρίς ερμηνεία)· το `loadConstraintsFromDb` είναι idempotent
+per-call· νέο unmapped hard constraint κάνει **fail-loud** (`log.warn`) αντί να
+εξαφανίζεται σιωπηλά. Άρα ένας μελλοντικός κανόνας ρέει προσθέτοντας (α) τον constraint
+στον provider και (β) ένα entry στο `ConstraintCodeMapping` — χωρίς άλλη αλλαγή.
+
+Ο live editor (`validateAssignment`/place/move) ΔΕΝ αγγίχτηκε (ξεχωριστό rule path).
+Helpers: σβήστηκε μόνο το ορφανό `hasFreeLunchHour`· κρατήθηκαν όσα έχουν άλλους callers.
+Gates: backend 194/194, frontend `tsc -b && vite build` καθαρό.
