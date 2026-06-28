@@ -6,8 +6,11 @@ import gr.upatras.ceid.timetable.entity.TimeSlot;
 import gr.upatras.ceid.timetable.entity.TimetableAssignment;
 import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
 import gr.upatras.ceid.timetable.repository.TimetableAssignmentRepository;
+import gr.upatras.ceid.timetable.solver.ConstraintCodeMapping;
 import gr.upatras.ceid.timetable.solver.HardViolation;
 import gr.upatras.ceid.timetable.solver.SolverService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -16,15 +19,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Φ-SV2b-ii-β1: παράγει τα HARD validation issues ενός προγράμματος ΕΞ ΟΛΟΚΛΗΡΟΥ από
- * τη μηχανή (Φ-SV1 engine → {@link HardViolationTranslator}), έτοιμο να αντικαταστήσει
- * τους χειρόγραφους ελέγχους του {@code validateTimetableReport} στη Φάση 2b-ii-β2.
- *
- * ΣΕ ΑΥΤΗ ΤΗ ΦΑΣΗ: ΔΕΝ καλείται από κανέναν controller (μηδέν live wiring) — εξασκείται
- * μόνο από το DB regression test. READ-ONLY.
+ * Παράγει τα HARD validation issues ενός προγράμματος ΕΞ ΟΛΟΚΛΗΡΟΥ από τη μηχανή
+ * (Φ-SV1 engine → {@link HardViolationTranslator}). Από τη Φάση 2b-ii-β2 είναι η ΜΟΝΑΔΙΚΗ
+ * πηγή των solver-εκφράσιμων hard errors του {@code validateTimetableReport} (το integrity
+ * layer + completeness παραμένουν χειρόγραφα εκεί). READ-ONLY.
  */
 @Service
 public class ValidationEngineService {
+
+    private static final Logger log = LoggerFactory.getLogger(ValidationEngineService.class);
 
     private final SolverService solverService;
     private final TimetableAssignmentRepository assignmentRepo;
@@ -41,10 +44,20 @@ public class ValidationEngineService {
     /**
      * Παράγει τα HARD validation issues ενός προγράμματος αποκλειστικά από το
      * score-explanation. Κάθε issue: {type:"ERROR", code, referenceId, assignmentIds,
-     * message}. READ-ONLY. ΔΕΝ καλείται live σε αυτή τη φάση.
+     * message}. READ-ONLY.
      */
     public List<Map<String, Object>> analyzeHardIssues(Long timetableId) {
         List<HardViolation> violations = solverService.analyzeHardViolations(timetableId);
+
+        // Fail-loud: μη-χαρτογραφημένο hard constraint (χωρίς report code) -> ορατό στα logs.
+        // Ο translator συνεχίζει να το κάνει skip· εδώ απλώς δεν εξαφανίζεται σιωπηλά (π.χ.
+        // μελλοντικός DB-driven περιορισμός χωρίς entry στο ConstraintCodeMapping).
+        for (HardViolation v : violations) {
+            if (ConstraintCodeMapping.codeFor(v.constraintName()).isEmpty()) {
+                log.warn("Unmapped hard constraint (no report code) — excluded from validation: {}",
+                        v.constraintName());
+            }
+        }
 
         // courseId -> display ονόματα ΕΝΕΡΓΩΝ διδασκόντων (από το authoritative M2M).
         // Join-fetched ώστε να μην εξαρτάται από OSIV/transaction (S2 pattern)· ίδιο

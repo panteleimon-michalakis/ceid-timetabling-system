@@ -38,6 +38,7 @@ private final gr.upatras.ceid.timetable.solver.SolverService solverService;
 private final gr.upatras.ceid.timetable.service.AssignmentSnapshotStamper snapshotStamper;
 private final TimetableScopeService scopeService;
 private final TimetableScopedCourseRepository scopedCourseRepo;
+private final gr.upatras.ceid.timetable.validation.ValidationEngineService validationEngineService;
 public TimetableController(TimetableRepository timetableRepo,
                            TimetableAssignmentRepository assignmentRepo,
                            CourseRepository courseRepo,
@@ -48,7 +49,8 @@ public TimetableController(TimetableRepository timetableRepo,
                            gr.upatras.ceid.timetable.solver.SolverService solverService,
                            gr.upatras.ceid.timetable.service.AssignmentSnapshotStamper snapshotStamper,
                            gr.upatras.ceid.timetable.service.TimetableScopeService scopeService,
-                           gr.upatras.ceid.timetable.repository.TimetableScopedCourseRepository scopedCourseRepo) {
+                           gr.upatras.ceid.timetable.repository.TimetableScopedCourseRepository scopedCourseRepo,
+                           gr.upatras.ceid.timetable.validation.ValidationEngineService validationEngineService) {
     this.snapshotStamper = snapshotStamper;
     this.scopeService = scopeService;
     this.scopedCourseRepo = scopedCourseRepo;
@@ -60,6 +62,7 @@ public TimetableController(TimetableRepository timetableRepo,
     this.timeSlotRepo = timeSlotRepo;
     this.courseTeacherRepo = courseTeacherRepo;
     this.solverService = solverService;
+    this.validationEngineService = validationEngineService;
 }
 
 private final RoomConstraintRepository roomConstraintRepo;
@@ -1121,46 +1124,9 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
                 }
             }
 
-            // Εργαστήριο σε μη εργαστηριακή αίθουσα
-            if (assignmentType == TimetableAssignment.AssignmentType.LAB
-                    && room.getRoomType() != Room.RoomType.LAB) {
-                errors.add(validationIssue(
-                        "ERROR",
-                        "LAB_ROOM_REQUIRED",
-                        "Το εργαστήριο " + course.getName() + " πρέπει να βρίσκεται σε εργαστηριακή αίθουσα.",
-                        assignment.getId()
-                ));
-            }
-
-            // 1ο έτος μόνο στο Γ για θεωρία/φροντιστήριο
-            if ((assignmentType == TimetableAssignment.AssignmentType.LECTURE
-                    || assignmentType == TimetableAssignment.AssignmentType.TUTORIAL)
-                    && course.getStudyYear() == 1
-                    && !"Γ".equals(room.getCode())) {
-                errors.add(validationIssue(
-                        "ERROR",
-                        "FIRST_YEAR_ROOM",
-                        "Το μάθημα 1ου έτους " + course.getName() + " πρέπει να μπει στο Αμφιθέατρο Γ.",
-                        assignment.getId()
-                ));
-            }
-
-            // Υποχρεωτικά μόνο Β ή Γ για θεωρία/φροντιστήριο
-            if ((assignmentType == TimetableAssignment.AssignmentType.LECTURE
-                    || assignmentType == TimetableAssignment.AssignmentType.TUTORIAL)
-                    && course.getCourseType() == Course.CourseType.REQUIRED) {
-
-                boolean allowedRequiredRoom = "Β".equals(room.getCode()) || "Γ".equals(room.getCode());
-
-                if (!allowedRequiredRoom) {
-                    errors.add(validationIssue(
-                            "ERROR",
-                            "REQUIRED_ROOM",
-                            "Το υποχρεωτικό μάθημα " + course.getName() + " πρέπει να βρίσκεται σε αίθουσα Β ή Γ.",
-                            assignment.getId()
-                    ));
-                }
-            }
+            // LAB_ROOM_REQUIRED / FIRST_YEAR_ROOM / REQUIRED_ROOM: παράγονται πλέον από
+            // τον engine (score-explanation, Φ-SV2b-ii-β2) — αφαιρέθηκαν από εδώ. Ο βρόχος
+            // κρατά μόνο το integrity layer (INVALID_ASSIGNMENT, SEMESTER_MISMATCH).
         }
 
         // 2. Έλεγχος συγκρούσεων αίθουσας και υποχρεωτικών ίδιου έτους
@@ -1178,7 +1144,7 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
 
                     if (examTimetable) {
                         // Κανόνας τμήματος: το μοίρασμα αίθουσας στην εξεταστική
-                        // επιτρέπεται — ενημερωτική προειδοποίηση, όχι σφάλμα.
+                        // επιτρέπεται — ενημερωτική προειδοποίηση, όχι σφάλμα (integrity/advisory).
                         warnings.add(validationIssue(
                                 "WARNING",
                                 "SHARED_EXAM_ROOM",
@@ -1187,169 +1153,20 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
                                         + a.getCourse().getName() + " και " + b.getCourse().getName() + ".",
                                 a.getId()
                         ));
-                    } else {
-                        errors.add(validationIssue(
-                                "ERROR",
-                                "ROOM_CONFLICT",
-                                "Η αίθουσα " + a.getRoom().getCode()
-                                        + " έχει δύο μαθήματα την ίδια ώρα: "
-                                        + a.getCourse().getName() + " και " + b.getCourse().getName() + ".",
-                                a.getId()
-                        ));
                     }
+                    // ROOM_CONFLICT (μη-εξεταστική): παράγεται πλέον από τον engine (Φ-SV2b-ii-β2).
                 }
 
 
-                if (a.getCourse() != null && b.getCourse() != null
-                        && a.getTimeSlot() != null && b.getTimeSlot() != null
-                        && a.getTimeSlot().getId().equals(b.getTimeSlot().getId())) {
+                // SAME_COURSE_SAME_SLOT / TEACHER_CONFLICT: παράγονται πλέον από τον engine
+                // (Φ-SV2b-ii-β2). Ο guard isSameCourseId παραμένει (test-covered).
 
-                    if (isSameCourseId(a.getCourse(), b.getCourse())) {
-                        // Ίδιο μάθημα δύο φορές στο ίδιο slot: αναφέρεται ΜΟΝΟ ως
-                        // SAME_COURSE_SAME_SLOT. Δεν είναι TEACHER_CONFLICT — αλλιώς
-                        // διπλομετριέται (κάθε μάθημα "μοιράζεται" τους διδάσκοντές
-                        // του με τον εαυτό του). Mirror του guard
-                        // !a.getCourseId().equals(b.getCourseId()) στον teacherConflict.
-                        errors.add(validationIssue(
-                                "ERROR",
-                                "SAME_COURSE_SAME_SLOT",
-                                "Το ίδιο μάθημα έχει τοποθετηθεί δύο φορές στην ίδια ώρα: "
-                                        + a.getCourse().getName() + ".",
-                                a.getId()
-                        ));
-                    } else {
-                        List<String> commonTeacherNames = findCommonTeacherNamesSmart(a.getCourse(), b.getCourse());
-
-                        if (!commonTeacherNames.isEmpty()) {
-                            String teacherText = String.join(", ", commonTeacherNames);
-
-                            errors.add(validationIssue(
-                                    "ERROR",
-                                    "TEACHER_CONFLICT",
-                                    "Σύγκρουση διδάσκοντα: " + teacherText
-                                            + " έχει δύο μαθήματα την ίδια ώρα: "
-                                            + a.getCourse().getName() + " και "
-                                            + b.getCourse().getName() + ".",
-                                    a.getId()
-                            ));
-                        }
-                    }
-                }
-
-                if (a.getCourse() != null && b.getCourse() != null
-        && a.getTimeSlot() != null && b.getTimeSlot() != null
-        && a.getCourse().getCourseType() == Course.CourseType.REQUIRED
-        && b.getCourse().getCourseType() == Course.CourseType.REQUIRED
-        && a.getCourse().getStudyYear() == b.getCourse().getStudyYear()
-        && !a.getCourse().getId().equals(b.getCourse().getId())) {
-
-    boolean sameSlot = a.getTimeSlot().getId().equals(b.getTimeSlot().getId());
-
-    boolean bothExamAssignments =
-            a.getAssignmentType() == TimetableAssignment.AssignmentType.EXAM
-                    && b.getAssignmentType() == TimetableAssignment.AssignmentType.EXAM;
-
-    boolean sameExamDate = examTimetable
-            && bothExamAssignments
-            && sameCalendarDay(a.getTimeSlot(), b.getTimeSlot());
-
-    if (examTimetable && sameExamDate) {
-        errors.add(validationIssue(
-                "ERROR",
-                "REQUIRED_YEAR_EXAM_SAME_DATE",
-                "Σύγκρουση υποχρεωτικών εξετάσεων ίδιου έτους την ίδια ημερομηνία: "
-                        + a.getCourse().getName() + " και " + b.getCourse().getName() + ".",
-                a.getId()
-        ));
-    } else if (!examTimetable && sameSlot) {
-        errors.add(validationIssue(
-                "ERROR",
-                "REQUIRED_YEAR_CONFLICT",
-                "Σύγκρουση υποχρεωτικών μαθημάτων ίδιου έτους την ίδια ώρα: "
-                        + a.getCourse().getName() + " και " + b.getCourse().getName() + ".",
-                a.getId()
-        ));
-    		    }
-		}
+                // REQUIRED_YEAR_CONFLICT / REQUIRED_YEAR_EXAM_SAME_DATE: παράγονται πλέον από τον engine (Φ-SV2b-ii-β2).
             }
         }
 
-if (!examTimetable) {
-        // 2β. Έλεγχος ορίου 6 ωρών θεωρίας ανά ημέρα και έτος
-        Map<Integer, Map<DayOfWeek, Integer>> lectureHoursPerYearDay = new LinkedHashMap<>();
-
-        for (TimetableAssignment assignment : assignments) {
-            if (assignment.getCourse() == null
-                    || assignment.getTimeSlot() == null
-                    || assignment.getAssignmentType() == null) {
-                continue;
-            }
-
-            if (assignment.getAssignmentType() != TimetableAssignment.AssignmentType.LECTURE) {
-                continue;
-            }
-
-	if (assignment.getCourse().getCourseType() != Course.CourseType.REQUIRED) {
-    	continue;
-	}
-
-            if (assignment.getTimeSlot().getDayOfWeek() == null) {
-                continue;
-            }
-
-            int studyYear = assignment.getCourse().getStudyYear();
-            DayOfWeek day = assignment.getTimeSlot().getDayOfWeek();
-
-            lectureHoursPerYearDay
-                    .computeIfAbsent(studyYear, key -> new LinkedHashMap<>())
-                    .put(day, lectureHoursPerYearDay
-                            .computeIfAbsent(studyYear, key -> new LinkedHashMap<>())
-                            .getOrDefault(day, 0) + 1);
-        }
-
-        for (Map.Entry<Integer, Map<DayOfWeek, Integer>> yearEntry : lectureHoursPerYearDay.entrySet()) {
-            int studyYear = yearEntry.getKey();
-
-            for (Map.Entry<DayOfWeek, Integer> dayEntry : yearEntry.getValue().entrySet()) {
-                DayOfWeek day = dayEntry.getKey();
-                int lectureHours = dayEntry.getValue();
-
-                if (lectureHours > 6) {
-                    errors.add(validationIssue(
-                            "ERROR",
-                            "DAILY_LECTURE_LIMIT",
-                            "Το " + studyYear + "ο έτος έχει " + lectureHours
-                                    + " ώρες θεωρίας την ημέρα " + greekDay(day.name())
-                                    + ". Το μέγιστο επιτρεπτό είναι 6.",
-                            null
-                    ));
-                }
-            }
-        }
-
-        // 2γ. Έλεγχος ελεύθερης ώρας φαγητού 12:00-15:00 για τα 3 πρώτα έτη
-        for (int year = 1; year <= 3; year++) {
-            for (DayOfWeek day : List.of(
-                    DayOfWeek.MONDAY,
-                    DayOfWeek.TUESDAY,
-                    DayOfWeek.WEDNESDAY,
-                    DayOfWeek.THURSDAY,
-                    DayOfWeek.FRIDAY)) {
-
-                boolean hasFreeLunchHour = hasFreeLunchHour(assignments, year, day);
-
-                if (!hasFreeLunchHour) {
-                    errors.add(validationIssue(
-                            "ERROR",
-                            "LUNCH_BREAK_REQUIRED",
-                            "Το " + year + "ο έτος δεν έχει ελεύθερη ώρα για φαγητό μεταξύ 12:00-15:00 την ημέρα "
-                                    + greekDay(day.name()) + ".",
-                            null
-                    ));
-                }
-            }
-        }
-}
+        // DAILY_LECTURE_LIMIT / LUNCH_BREAK_REQUIRED (aggregates): παράγονται πλέον
+        // από τον engine (Φ-SV2b-ii-β2) — αφαιρέθηκε όλο το if(!examTimetable) block.
 
         // 3. Έλεγχος πληρότητας προγράμματος (#5: από ΠΑΓΩΜΕΝΟ scope, όχι live findAll)
         List<TimetableScopedCourse> relevantCourses = scopedCoursesFor(timetable);
@@ -1379,6 +1196,11 @@ if (!examTimetable) {
                         TimetableAssignment.AssignmentType.LAB, course.getReqLabHours(), warnings, errors);
             }
         }
+
+        // HARD validation errors ΕΞ ΟΛΟΚΛΗΡΟΥ από τον engine (score-explanation) — η ΜΟΝΑΔΙΚΗ
+        // πηγή των solver-εκφράσιμων hard constraints (Φ-SV2b-ii-β2). Τα παραπάνω κρατούν μόνο
+        // integrity layer + completeness + SHARED_EXAM_ROOM. Έτσι: hardScore 0 ⇔ 0 hard errors.
+        errors.addAll(validationEngineService.analyzeHardIssues(id));
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("valid", errors.isEmpty());
@@ -2733,31 +2555,6 @@ private int getRequiredHoursForAssignmentType(
         dto.put("required", required);
 
         return dto;
-    }
-
-    private boolean hasFreeLunchHour(List<TimetableAssignment> assignments, int studyYear, DayOfWeek day) {
-        Set<LocalTime> occupiedLunchStarts = new HashSet<>();
-
-        for (TimetableAssignment a : assignments) {
-            if (a.getCourse() == null || a.getTimeSlot() == null) continue;
-            // Ευθυγράμμιση με τον solver: το μεσημεριανό κενό αφορά τα
-            // υποχρεωτικά του έτους — τα επιλογής είναι προαιρετική παρακολούθηση.
-            if (a.getCourse().getCourseType() != Course.CourseType.REQUIRED) continue;
-            if (a.getCourse().getStudyYear() != studyYear) continue;
-            if (a.getTimeSlot().getDayOfWeek() != day) continue;
-
-            LocalTime start = a.getTimeSlot().getStartTime();
-
-            if (start != null &&
-                    !start.isBefore(LocalTime.of(12, 0)) &&
-                    start.isBefore(LocalTime.of(15, 0))) {
-                occupiedLunchStarts.add(start);
-            }
-        }
-
-        return !occupiedLunchStarts.contains(LocalTime.of(12, 0))
-                || !occupiedLunchStarts.contains(LocalTime.of(13, 0))
-                || !occupiedLunchStarts.contains(LocalTime.of(14, 0));
     }
 
     private String formatSlot(TimeSlot slot) {
