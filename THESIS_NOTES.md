@@ -833,3 +833,31 @@ sites (tests) αμετάβλητα. Placement constraints → κενό `contextF
 κλειδωμένο από test). Full suite 172/172 (engine +2, translator +1). ΜΗΔΕΝ live wiring —
 το flip στο `validateTimetableReport` παραμένει η Φάση 2b-ii-β· αυτό το βήμα αφαιρεί το
 τελευταίο message-regression ρίσκο πριν από αυτό.
+
+## Φ-SV2b-ii-β1 — Engine-derived validation service, αποδεδειγμένο σε DB (χωρίς wiring)
+
+### [5f53a8c] Τα hard issues παράγονται end-to-end από τη μηχανή
+Το `ValidationEngineService.analyzeHardIssues(timetableId)` συνθέτει την πλήρη αλυσίδα
+Φ-SV: `analyzeHardViolations` (engine/score-explanation) → `HardViolationTranslator`
+(violation → issue {type, code, referenceId, assignmentIds, message}). Είναι το έτοιμο
+αντικαταστάτη των χειρόγραφων hard βρόχων του `validateTimetableReport` — αλλά **ΔΕΝ
+συνδέεται ακόμη πουθενά live** (το flip είναι το β2). Εδώ αποδεικνύεται σε **πραγματική
+βάση**.
+
+**Option L (live course/room/teachers):** ο adapter `toView` διαβάζει τα live δεδομένα
+της ανάθεσης — ίδια δεδομένα με τον σημερινό report → **μηδέν immutability regression**
+σε αυτό το βήμα. Το πλήρες snapshot-first hard validation είναι ξεχωριστή μελλοντική
+απόφαση (BL-11), ώστε να μη μπλέξει το flip με αλλαγή σημασιολογίας.
+
+**Display ονόματα διδασκόντων:** από το authoritative M2M (`findAllWithTeacherAndCourse`,
+join-fetch → ανεξάρτητο από OSIV/transaction, S2 pattern· ίδιο active-φίλτρο με τον
+engine). Ο translator κάνει την τομή για το `TEACHER_CONFLICT` (κενή τομή → «κοινός
+διδάσκων»).
+
+**DB proof (7 σενάρια, @SpringBootTest, seed-own/assert-own/teardown — BL-9 αρχή):**
+`ROOM_CONFLICT`, `LAB_ROOM_REQUIRED`, **`TEACHER_BLOCKED` (NEW)**, **`ROOM_BLOCKED`
+(NEW)**, `DAILY_LECTURE_LIMIT` (πλήρες μήνυμα από group-key: «Το 2ο έτος έχει 7 ώρες
+θεωρίας την ημέρα Δευτέρα…»), `TEACHER_CONFLICT` (όνομα κοινού διδάσκοντα), και clean
+(καμία issue). **Τα 2 νέα blocked errors επιβεβαιώθηκαν σε πραγματικά seeded δεδομένα**
+(TeacherConstraint/RoomConstraint → loadConstraintsFromDb → engine), δηλαδή ό,τι έχανε
+το παλιό report παράγεται τώρα από τη μηχανή. Full suite 179/179, μηδέν live αλλαγή.
