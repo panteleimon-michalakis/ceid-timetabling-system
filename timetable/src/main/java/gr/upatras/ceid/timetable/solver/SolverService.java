@@ -186,6 +186,11 @@ public class SolverService {
      * με αρνητικό hard impact και μαπάρει τα indicted Lessons σε assignment ids. Κάθε
      * ConstraintMatch → μία {@link HardViolation}. Package-private static για
      * στοχευμένο test (precedent: buildTeacherKeyMap/S2).
+     *
+     * Ο engine μένει CONSTRAINT-AGNOSTIC: εξάγει (α) τα indicted Lessons ως assignment ids
+     * και (β) τα υπόλοιπα raw indicted facts ως {@code contextFacts} (π.χ. το group-key
+     * [studyYear, day, count] των aggregate constraints), ΧΩΡΙΣ να τα ερμηνεύει. Η ερμηνεία
+     * (ποιο fact = year/day/count) ζει στον translator.
      */
     static List<HardViolation> extractHardViolations(
             ScoreExplanation<CeidTimetable, HardSoftScore> explanation) {
@@ -198,8 +203,12 @@ public class SolverService {
                         .filter(o -> o instanceof Lesson)
                         .map(o -> ((Lesson) o).getId())
                         .distinct().toList();
+                // raw non-Lesson facts στη σειρά του indictment (group-key order)
+                List<Object> contextFacts = cm.getIndictedObjectList().stream()
+                        .filter(o -> !(o instanceof Lesson))
+                        .toList();
                 out.add(new HardViolation(cmt.getConstraintRef().constraintName(),
-                                          ids, cm.getScore().hardScore()));
+                                          ids, cm.getScore().hardScore(), contextFacts));
             }
         }
         return out;

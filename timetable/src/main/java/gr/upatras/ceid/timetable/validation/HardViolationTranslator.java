@@ -69,13 +69,14 @@ public final class HardViolationTranslator {
             issue.put("code", code);
             issue.put("referenceId", referenceId);
             issue.put("assignmentIds", ids);
-            issue.put("message", buildMessage(code, ids, lookup));
+            issue.put("message", buildMessage(code, ids, v.contextFacts(), lookup));
             issues.add(issue);
         }
         return issues;
     }
 
     private static String buildMessage(String code, List<Long> ids,
+                                       List<Object> contextFacts,
                                        Function<Long, AssignmentView> lookup) {
         AssignmentView a = ids.isEmpty() ? null : safeView(ids.get(0), lookup);
         AssignmentView b = ids.size() < 2 ? null : safeView(ids.get(1), lookup);
@@ -102,12 +103,23 @@ public final class HardViolationTranslator {
                     "Το μάθημα 1ου έτους " + courseName(a) + " πρέπει να μπει στο Αμφιθέατρο Γ.";
             case "REQUIRED_ROOM" ->
                     "Το υποχρεωτικό μάθημα " + courseName(a) + " πρέπει να βρίσκεται σε αίθουσα Β ή Γ.";
-            // Aggregates: ο engine δίνει κενά assignmentIds (group-key indictment) -> generic.
-            case "DAILY_LECTURE_LIMIT" ->
-                    "Υπέρβαση του ημερήσιου ορίου των 6 ωρών θεωρίας για υποχρεωτικά μαθήματα ίδιου έτους.";
-            case "LUNCH_BREAK_REQUIRED" ->
-                    "Υποχρεωτικά μαθήματα ίδιου έτους καλύπτουν όλο το μεσημεριανό διάστημα 12:00-15:00, "
-                            + "χωρίς ελεύθερη ώρα για φαγητό.";
+            // Aggregates: ερμηνεία του group-key (contextFacts) σε ΠΛΗΡΕΣ μήνυμα (έτος/ημέρα/N)·
+            // defensive fallback στο generic αν το shape δεν ταιριάζει (ΠΟΤΕ crash).
+            case "DAILY_LECTURE_LIMIT" -> {
+                AggregateInfo agg = parseAggregate(contextFacts);
+                yield agg != null
+                        ? "Το " + agg.studyYear() + "ο έτος έχει " + agg.count()
+                                + " ώρες θεωρίας την ημέρα " + gd(agg.day()) + ". Το μέγιστο επιτρεπτό είναι 6."
+                        : "Υπέρβαση του ημερήσιου ορίου των 6 ωρών θεωρίας για υποχρεωτικά μαθήματα ίδιου έτους.";
+            }
+            case "LUNCH_BREAK_REQUIRED" -> {
+                AggregateInfo agg = parseAggregate(contextFacts);
+                yield agg != null
+                        ? "Το " + agg.studyYear() + "ο έτος δεν έχει ελεύθερη ώρα για φαγητό μεταξύ "
+                                + "12:00-15:00 την ημέρα " + gd(agg.day()) + "."
+                        : "Υποχρεωτικά μαθήματα ίδιου έτους καλύπτουν όλο το μεσημεριανό διάστημα 12:00-15:00, "
+                                + "χωρίς ελεύθερη ώρα για φαγητό.";
+            }
             // NEW (D2)
             case "TEACHER_BLOCKED" ->
                     "Ο διδάσκων του μαθήματος " + courseName(a)
@@ -153,5 +165,29 @@ public final class HardViolationTranslator {
         if (day != null) return " (" + day + ")";
         if (h != null) return " (" + h + ":00)";
         return "";
+    }
+
+    /** Ελληνική ημέρα (π.χ. "MONDAY" -> "Δευτέρα")· null/άγνωστο -> passthrough/κενό. */
+    private static String gd(String day) {
+        if (day == null) return "";
+        return GREEK_DAYS.getOrDefault(day, day);
+    }
+
+    /** Ερμηνεία του group-key των aggregates: [studyYear:Integer, day:String, count:Integer]. */
+    private record AggregateInfo(int studyYear, String day, int count) {}
+
+    /**
+     * DEFENSIVE parse του contextFacts ενός aggregate violation. Αν το shape δεν ταιριάζει
+     * (π.χ. κενό, ή ο engine αλλάξει) -> null ώστε ο caller να πέσει σε generic fallback
+     * (ΠΟΤΕ crash). Order: groupBy(studyYear, day, count).
+     */
+    private static AggregateInfo parseAggregate(List<Object> facts) {
+        if (facts != null && facts.size() >= 3
+                && facts.get(0) instanceof Integer y
+                && facts.get(1) instanceof String d
+                && facts.get(2) instanceof Integer c) {
+            return new AggregateInfo(y, d, c);
+        }
+        return null;
     }
 }

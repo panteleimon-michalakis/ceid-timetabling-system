@@ -96,33 +96,46 @@ class HardViolationTranslatorTest {
                 issue.get("message"));
     }
 
-    // ---------- 4) DAILY_LECTURE_LIMIT (aggregate) ----------
+    // ---------- 4) DAILY_LECTURE_LIMIT (aggregate — rich μήνυμα από group-key) ----------
 
     @Test
-    void dailyLectureLimit_aggregate_refIdNull_genericMessage() {
-        // aggregate → referenceId null ΑΝΕΞΑΡΤΗΤΩΣ ids (εδώ μη-κενά για να ελεγχθεί ο κανόνας).
-        // Production: ο engine δίνει ΚΕΝΑ ids (group-key indictment — επιβεβαιωμένο με probe).
-        Map<String, Object> issue = single(translate(
-                new HardViolation("Daily lecture limit for required courses",
-                        List.of(105L, 103L, 104L), -1)));
+    void dailyLectureLimit_aggregate_richMessageFromContextFacts() {
+        // Production: ids κενά (group-key indictment)· το group-key έρχεται ως contextFacts.
+        Map<String, Object> issue = single(translate(new HardViolation(
+                "Daily lecture limit for required courses", List.of(), -1, List.of(2, "MONDAY", 7))));
+        assertEquals("DAILY_LECTURE_LIMIT", issue.get("code"));
+        assertNull(issue.get("referenceId"));
+        assertEquals(List.of(), issue.get("assignmentIds"));
+        assertEquals("Το 2ο έτος έχει 7 ώρες θεωρίας την ημέρα Δευτέρα. Το μέγιστο επιτρεπτό είναι 6.",
+                issue.get("message"));
+    }
+
+    // ---------- 5) LUNCH_BREAK_REQUIRED (aggregate — rich μήνυμα από group-key) ----------
+
+    @Test
+    void lunchBreak_aggregate_richMessageFromContextFacts() {
+        Map<String, Object> issue = single(translate(new HardViolation(
+                "Lunch break required for first three years", List.of(), -3, List.of(1, "FRIDAY", 3))));
+        assertEquals("LUNCH_BREAK_REQUIRED", issue.get("code"));
+        assertNull(issue.get("referenceId"));
+        assertEquals(List.of(), issue.get("assignmentIds"));
+        assertEquals("Το 1ο έτος δεν έχει ελεύθερη ώρα για φαγητό μεταξύ 12:00-15:00 την ημέρα Παρασκευή.",
+                issue.get("message"));
+    }
+
+    // ---------- 5b) aggregate με λάθος-shape contextFacts → generic fallback ----------
+
+    @Test
+    void aggregate_wrongShapeContextFacts_genericFallback() {
+        // Κενά contextFacts (3-args constructor) → generic fallback (μη-crash). Επιπλέον τα ids
+        // μη-κενά → επιβεβαιώνει ότι aggregate code ΕΠΙΒΑΛΛΕΙ referenceId=null ΑΝΕΞΑΡΤΗΤΩΣ ids.
+        Map<String, Object> issue = single(translate(new HardViolation(
+                "Daily lecture limit for required courses", List.of(105L, 103L, 104L), -1)));
         assertEquals("DAILY_LECTURE_LIMIT", issue.get("code"));
         assertNull(issue.get("referenceId"));
         assertEquals(List.of(103L, 104L, 105L), issue.get("assignmentIds"));
         assertEquals("Υπέρβαση του ημερήσιου ορίου των 6 ωρών θεωρίας για υποχρεωτικά μαθήματα ίδιου έτους.",
                 issue.get("message"));
-    }
-
-    // ---------- 5) LUNCH_BREAK_REQUIRED (aggregate, κενά ids — production-accurate) ----------
-
-    @Test
-    void lunchBreak_aggregate_emptyIds_genericMessage() {
-        Map<String, Object> issue = single(translate(
-                new HardViolation("Lunch break required for first three years", List.of(), -3)));
-        assertEquals("LUNCH_BREAK_REQUIRED", issue.get("code"));
-        assertNull(issue.get("referenceId"));
-        assertEquals(List.of(), issue.get("assignmentIds"));
-        assertEquals("Υποχρεωτικά μαθήματα ίδιου έτους καλύπτουν όλο το μεσημεριανό διάστημα 12:00-15:00, "
-                + "χωρίς ελεύθερη ώρα για φαγητό.", issue.get("message"));
     }
 
     // ---------- 6) TEACHER_BLOCKED (NEW) ----------

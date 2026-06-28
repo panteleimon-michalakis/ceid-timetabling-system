@@ -116,6 +116,8 @@ class SolutionAnalysisTest {
         assertEquals(-1, hv.hardImpact(), "βάρος WEEKLY_ROOM_CONFLICT = 1");
         assertEquals(Set.of(101L, 102L), Set.copyOf(hv.assignmentIds()),
                 "και τα 2 assignment ids ενοχοποιούνται");
+        assertTrue(hv.contextFacts().isEmpty(),
+                "placement constraint: κενά contextFacts (μη-regression)");
     }
 
     // ---------- 3) teacher blocked slot (ήταν MISSING στο παλιό report) ----------
@@ -196,5 +198,41 @@ class SolutionAnalysisTest {
         assertEquals("Δ1", sroom.getCode());
         assertEquals(110, sroom.getCapacity());
         assertEquals("CLASSROOM", sroom.getRoomType());
+    }
+
+    // ---------- 6) aggregate group-key capture (Φ-SV2b-ii-α) ----------
+
+    @Test
+    void dailyLectureLimit_capturesGroupKeyInContextFacts() {
+        // 7 required LECTURE ίδιου έτους/μέρας, ώρες εκτός μεσημεριού (9-11,15-18) ώστε
+        // να σπάει ΜΟΝΟ το Daily lecture limit (όχι lunch break).
+        int[] hours = {9, 10, 11, 15, 16, 17, 18};
+        Lesson[] ls = new Lesson[7];
+        for (int i = 0; i < 7; i++) {
+            ls[i] = placed(700 + i, 700 + i, "C" + i, 2, "REQUIRED", "LECTURE", 100,
+                    slot(70 + i, "MONDAY", hours[i]), BETA, "T" + i + "|X");
+        }
+        List<HardViolation> v = analyze(solutionOf(ls));
+        assertEquals(1, v.size(), "μόνο το Daily lecture limit");
+        HardViolation hv = v.get(0);
+        assertEquals("Daily lecture limit for required courses", hv.constraintName());
+        assertTrue(hv.assignmentIds().isEmpty(), "aggregate: κανένα Lesson indicted");
+        assertEquals(List.of(2, "MONDAY", 7), hv.contextFacts(),
+                "group-key [studyYear, day, count]");
+    }
+
+    @Test
+    void lunchBreak_capturesGroupKeyInContextFacts() {
+        // 3 required μαθήματα στις 3 μεσημεριανές ώρες (12,13,14) ίδιου έτους/μέρας.
+        Lesson a = placed(800, 800, "L0", 2, "REQUIRED", "LECTURE", 100, slot(80, "MONDAY", 12), BETA, "U0|X");
+        Lesson b = placed(801, 801, "L1", 2, "REQUIRED", "LECTURE", 100, slot(81, "MONDAY", 13), BETA, "U1|X");
+        Lesson c = placed(802, 802, "L2", 2, "REQUIRED", "LECTURE", 100, slot(82, "MONDAY", 14), BETA, "U2|X");
+        List<HardViolation> v = analyze(solutionOf(a, b, c));
+        assertEquals(1, v.size(), "μόνο το Lunch break");
+        HardViolation hv = v.get(0);
+        assertEquals("Lunch break required for first three years", hv.constraintName());
+        assertTrue(hv.assignmentIds().isEmpty(), "aggregate: κανένα Lesson indicted");
+        assertEquals(List.of(2, "MONDAY", 3), hv.contextFacts(),
+                "group-key [studyYear, day, countDistinct λ. ωρών]");
     }
 }
