@@ -805,3 +805,31 @@ fallback). Πρακτικά: τα 2 aggregate μηνύματα είναι ελα
 
 Zero live change: full suite 169/169 (157 baseline + 12 νέα translator tests). Το live
 wiring στο `validateTimetableReport` + αφαίρεση χειρόγραφων hard checks = Φάση 2b-ii.
+
+## Φ-SV2b-ii-α — Group-key capture: πλήρη aggregate μηνύματα, χωρίς να «μολυνθεί» ο engine
+
+### [940e154] Constraint-agnostic engine + interpretation στον translator
+Στο 2b-i το probe έδειξε ότι τα 2 aggregate hard constraints (`Daily lecture limit`,
+`Lunch break`) indict-άρουν ΜΟΝΟ το group-key `[studyYear, day, count]` (raw
+Integer/String), κανένα `Lesson` — οπότε ο translator έδινε generic μήνυμα (έχανε
+έτος/ημέρα/N σε σχέση με το σημερινό χειρόγραφο report). Αυτό ήταν το τελευταίο εμπόδιο
+για «engine = πλήρης μοναδική πηγή».
+
+Λύση με σεβασμό στην αρχιτεκτονική: ο **engine μένει constraint-agnostic**. Η
+`extractHardViolations` εξάγει πλέον και τα **raw non-Lesson facts** ως `contextFacts`
+(νέο πεδίο στο `HardViolation`, στη σειρά του indictment), ΧΩΡΙΣ να ξέρει τι σημαίνουν.
+Η **ερμηνεία** (fact[0]=year, fact[1]=day, fact[2]=count) ζει στον **translator**, εκεί
+που ήδη υπάρχει η code-specific λογική. Έτσι:
+- Τα 2 aggregates δίνουν τώρα **πλήρες** μήνυμα: «Το 2ο έτος έχει 7 ώρες θεωρίας την
+  ημέρα Δευτέρα. Το μέγιστο επιτρεπτό είναι 6.» / «Το 1ο έτος δεν έχει ελεύθερη ώρα για
+  φαγητό μεταξύ 12:00-15:00 την ημέρα Παρασκευή.» — ίσο με το σημερινό report.
+- **Defensive parse:** αν το shape του group-key δεν ταιριάζει (κενό/αλλαγμένο) →
+  generic fallback, ΠΟΤΕ crash.
+- **Μελλοντικοί DB-driven περιορισμοί** ρέουν χωρίς αλλαγή στον engine — μόνο ο
+  translator μαθαίνει νέα codes.
+
+Backwards-compatible: το `HardViolation` κρατά 3-args constructor → όλα τα παλιά call
+sites (tests) αμετάβλητα. Placement constraints → κενό `contextFacts` (μη-regression,
+κλειδωμένο από test). Full suite 172/172 (engine +2, translator +1). ΜΗΔΕΝ live wiring —
+το flip στο `validateTimetableReport` παραμένει η Φάση 2b-ii-β· αυτό το βήμα αφαιρεί το
+τελευταίο message-regression ρίσκο πριν από αυτό.
