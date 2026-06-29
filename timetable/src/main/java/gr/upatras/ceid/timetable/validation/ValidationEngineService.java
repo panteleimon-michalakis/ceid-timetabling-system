@@ -93,20 +93,37 @@ public class ValidationEngineService {
     }
 
     /**
-     * Adapter TimetableAssignment -> AssignmentView (LIVE course/room/teachers = Option L).
-     * Τα ονόματα διδασκόντων έρχονται από τον προ-υπολογισμένο χάρτη (M2M source).
+     * Adapter TimetableAssignment -> AssignmentView. BL-11: SNAPSHOT-FIRST (snapshot
+     * non-null κερδίζει, αλλιώς live fallback) στα name/studyYear/room/day/hour ώστε τα
+     * μηνύματα των hard issues παγωμένων προγραμμάτων να μένουν αμετάβλητα σε μελλοντικά
+     * edits. Τα teacher names ΕΞΑΙΡΟΥΝΤΑΙ (μένουν live M2M) — BL-8 carve-out: το
+     * snapshot_teachers_text είναι corrupted (6.4% drift) μέχρι να φτιαχτεί το BL-8.
      */
     private AssignmentView toView(TimetableAssignment a, Map<Long, List<String>> teacherNamesByCourse) {
         Course c = a.getCourse();
         TimeSlot ts = a.getTimeSlot();
+
+        String courseName = a.getSnapshotCourseName() != null ? a.getSnapshotCourseName() : c.getName();
+        int studyYear = a.getSnapshotStudyYear() != null ? a.getSnapshotStudyYear()
+                : (c.getStudyYear() != null ? c.getStudyYear() : 0);
+        String roomCode = a.getSnapshotRoomCode() != null ? a.getSnapshotRoomCode() : a.getRoom().getCode();
+        String dayName = a.getSnapshotDayOfWeek() != null ? a.getSnapshotDayOfWeek()
+                : (ts.getDayOfWeek() != null ? ts.getDayOfWeek().name() : null);
+        Integer startHour = a.getSnapshotStartTime() != null ? a.getSnapshotStartTime().getHour()
+                : (ts.getStartTime() != null ? ts.getStartTime().getHour() : null);
+
+        // BL-11: teacher names ΜΕΝΟΥΝ live μέχρι το BL-8 (snapshot_teachers_text corrupted →
+        // 6.4% drift)· τα υπόλοιπα πεδία είναι snapshot-first (immutable).
+        List<String> teacherNames = teacherNamesByCourse.getOrDefault(c.getId(), List.of());
+
         return new AssignmentView(
                 a.getId(),
-                c.getName(),
-                c.getStudyYear() != null ? c.getStudyYear() : 0,
-                a.getRoom().getCode(),
-                ts.getDayOfWeek() != null ? ts.getDayOfWeek().name() : null,
-                ts.getStartTime() != null ? ts.getStartTime().getHour() : null,
-                teacherNamesByCourse.getOrDefault(c.getId(), List.of()),
+                courseName,
+                studyYear,
+                roomCode,
+                dayName,
+                startHour,
+                teacherNames,
                 a.getAssignmentType().name());
     }
 }

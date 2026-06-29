@@ -158,28 +158,85 @@ public class SolverService {
             if (a.getCourse() == null || a.getRoom() == null || a.getTimeSlot() == null
                     || a.getAssignmentType() == null) continue;
             Course c = a.getCourse();
+            // BL-11: snapshot-first για τα HARD-relevant πεδία (snapshot non-null κερδίζει)·
+            // expectedStudents/semesterType/exam-prefs ΜΕΝΟΥΝ live (soft/inert — βλ. §0 spec).
+            String code  = a.getSnapshotCourseCode() != null ? a.getSnapshotCourseCode() : c.getCode();
+            String name  = a.getSnapshotCourseName() != null ? a.getSnapshotCourseName() : c.getName();
+            int year     = a.getSnapshotStudyYear()  != null ? a.getSnapshotStudyYear()  : c.getStudyYear();
+            String cType = a.getSnapshotCourseType() != null ? a.getSnapshotCourseType()
+                           : (c.getCourseType() != null ? c.getCourseType().name() : "ELECTIVE");
+            int sem      = a.getSnapshotSemester()   != null ? a.getSnapshotSemester()
+                           : (c.getSemester() != null ? c.getSemester() : 0);
             Lesson l = new Lesson(
-                    a.getId(), c.getId(), c.getCode(), c.getName(), c.getStudyYear(),
-                    c.getCourseType() != null ? c.getCourseType().name() : "ELECTIVE",
+                    a.getId(), c.getId(), code, name, year, cType,
                     a.getAssignmentType().name(),
-                    c.getExpectedStudents() != null ? c.getExpectedStudents() : 50,
-                    c.getSemesterType() != null ? c.getSemesterType().name() : null,
-                    c.getSemester() != null ? c.getSemester() : 0);
-            l.setTeacherKeys(teacherKeyMap.getOrDefault(c.getId(), Set.of()));
-            // A6 exam prefs (mirror του buildLessons) — αδρανή για weekly.
+                    c.getExpectedStudents() != null ? c.getExpectedStudents() : 50,   // live (soft: roomCapacityMatch)
+                    c.getSemesterType() != null ? c.getSemesterType().name() : null,  // live (inert)
+                    sem);
+            // BL-11: teacher keys ΜΕΝΟΥΝ live μέχρι το BL-8 (snapshot_teachers_text corrupted
+            // από μη-idempotent cleanTeacherDisplayName → 6.4% key drift). Ο snapshotTeacherKeys
+            // helper είναι έτοιμος hook: γύρνα εδώ όταν διορθωθεί το BL-8 + γίνει clean re-stamp,
+            // με το format-consistency test ως gate.
+            l.setTeacherKeys(teacherKeyMap.getOrDefault(c.getId(), Set.of()));        // live (BL-8 carve-out)
+            // A6 exam prefs (mirror του buildLessons) — αδρανή για weekly, μένουν live.
             l.setPreferredRoomCodes(parseCsvCodes(c.getPreferredExamRooms()));
             l.setPreferredStartHours(parseCsvHours(c.getPreferredExamHours()));
 
             SolverTimeSlot sts = slotIndex.computeIfAbsent(a.getTimeSlot().getId(),
-                    k -> toSolverTimeSlot(a.getTimeSlot()));
+                    k -> buildSnapshotTimeSlot(a));
             SolverRoom sr = roomIndex.computeIfAbsent(a.getRoom().getId(),
-                    k -> toSolverRoom(a.getRoom()));
+                    k -> buildSnapshotRoom(a));
             l.setTimeSlot(sts);   // ΗΔΗ τοποθετημένο
             l.setRoom(sr);
             lessons.add(l);
         }
         return new CeidTimetable(new ArrayList<>(slotIndex.values()),
                                  new ArrayList<>(roomIndex.values()), lessons);
+    }
+
+    // ── BL-11: snapshot-first helpers (ΜΟΝΟ analysis path· ΟΧΙ solve) ──────────
+    // Snapshot non-null κερδίζει, αλλιώς live fallback — ίδιος κανόνας με το
+    // putSnapshotFirst render rule. Έτσι τα hard errors παγωμένων προγραμμάτων
+    // μένουν αμετάβλητα σε μελλοντικά edits μαθήματος/αίθουσας/slot. Οι shared
+    // mappers toSolverRoom/toSolverTimeSlot (solve path) ΔΕΝ αγγίζονται.
+
+    /** BL-11: SolverRoom από snapshot-first (snapshot non-null κερδίζει, αλλιώς live room).
+     *  Package-private για στοχευμένο test (precedent: toSolverRoom/buildTeacherKeyMap). */
+    SolverRoom buildSnapshotRoom(TimetableAssignment a) {
+        Room live = a.getRoom();
+        String code = a.getSnapshotRoomCode()     != null ? a.getSnapshotRoomCode()     : live.getCode();
+        Integer cap = a.getSnapshotRoomCapacity() != null ? a.getSnapshotRoomCapacity() : live.getCapacity();
+        String type = a.getSnapshotRoomType()     != null ? a.getSnapshotRoomType()
+                      : (live.getRoomType() != null ? live.getRoomType().name() : "CLASSROOM");
+        return new SolverRoom(live.getId(), code, cap != null ? cap : 0, type);
+    }
+
+    /** BL-11: SolverTimeSlot από snapshot-first. dayKey = ISO date (exam) ή ημέρα (weekly).
+     *  Package-private για στοχευμένο test. */
+    SolverTimeSlot buildSnapshotTimeSlot(TimetableAssignment a) {
+        TimeSlot live = a.getTimeSlot();
+        String day = a.getSnapshotDayOfWeek() != null ? a.getSnapshotDayOfWeek()
+                     : (live.getDayOfWeek() != null ? live.getDayOfWeek().name() : "MONDAY");
+        int startHour = a.getSnapshotStartTime() != null ? a.getSnapshotStartTime().getHour()
+                        : (live.getStartTime() != null ? live.getStartTime().getHour() : 9);
+        String dayKey = a.getSnapshotSpecificDate() != null ? a.getSnapshotSpecificDate().toString() : day;
+        return new SolverTimeSlot(live.getId(), day, startHour, dayKey);
+    }
+
+    /** BL-11: teacher keys από snapshot_teachers_text (frozen) μέσω της ΙΔΙΑΣ
+     *  splitTeacherText+teacherKey αλυσίδας με το buildTeacherKeyMap, αλλιώς live map.
+     *  Package-private για στοχευμένο test (format round-trip). */
+    Set<String> snapshotTeacherKeys(TimetableAssignment a, Map<Long, Set<String>> liveMap) {
+        String txt = a.getSnapshotTeachersText();
+        if (txt != null && !txt.isBlank()) {
+            Set<String> keys = new LinkedHashSet<>();
+            for (String part : splitTeacherText(txt)) {
+                String k = teacherKey(part);
+                if (k != null && !k.isBlank()) keys.add(k);
+            }
+            return keys;
+        }
+        return liveMap.getOrDefault(a.getCourse().getId(), Set.of());  // fallback: live (unstamped row)
     }
 
     /**
