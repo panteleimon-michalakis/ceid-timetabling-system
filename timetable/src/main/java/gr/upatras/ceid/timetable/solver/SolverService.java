@@ -13,6 +13,7 @@ import gr.upatras.ceid.timetable.entity.TeacherConstraint;
 import gr.upatras.ceid.timetable.entity.RoomConstraint;
 import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import gr.upatras.ceid.timetable.repository.*;
+import gr.upatras.ceid.timetable.util.CourseRelevance;
 import gr.upatras.ceid.timetable.util.ExamDateRules;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -479,29 +480,12 @@ private static java.util.Set<Integer> parseCsvHours(String csv) {
 }
 
 private boolean isCourseRelevant(Course course, Timetable timetable) {
-    if (course == null || timetable == null) return false;
-
-    // Ανενεργά μαθήματα αγνοούνται
-    if (course.getActive() != null && !course.getActive()) return false;
-
-    // Μαθήματα που γίνονται σε συνεννόηση αγνοούνται
-    if (course.getVisibleInTimetable() != null && !course.getVisibleInTimetable()) return false;
-
-    Timetable.SemesterType ttSem = timetable.getSemesterType();
-    Course.SemesterType cSem = course.getSemesterType();
-
-    // Αν δεν ορίζεται semesterType σε timetable ή course → συμπεριλαμβάνεται
-    if (ttSem == null || cSem == null) return true;
-
-    // BOTH courses → συμπεριλαμβάνονται σε όλα τα timetables
-    if (cSem == Course.SemesterType.BOTH) return true;
-
-    // SEPTEMBER exam → περιλαμβάνει ΟΛΑ τα ενεργά μαθήματα (FALL + SPRING + BOTH)
-    if (ttSem == Timetable.SemesterType.SEPTEMBER) return true;
-
-    // FALL timetable → FALL courses
-    // SPRING timetable → SPRING courses
-    return ttSem.name().equals(cSem.name());
+    // BL-10: ενοποιημένη schedulability predicate (active ∧ visible ∧ semester).
+    // Ήταν inline εδώ· εξήχθη στο util.CourseRelevance.isSchedulable ώστε το παγωμένο
+    // scope (TimetableScopeService) == ΑΚΡΙΒΩΣ ό,τι επιχειρεί να τοποθετήσει ο solver,
+    // χωρίς drift. Ταυτόσημο σε αποτέλεσμα με το προηγούμενο inline body (Gate A,
+    // κλειδωμένο από CourseRelevanceSchedulabilityTest — 144-combo equivalence oracle).
+    return CourseRelevance.isSchedulable(course, timetable);
 }
 
 /*

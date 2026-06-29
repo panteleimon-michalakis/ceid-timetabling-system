@@ -145,6 +145,29 @@ class TimetableScopeImmutabilityTest {
     }
 
     // ====================================================================
+    // 6. BL-10: το freeze ευθυγραμμίζεται με τη schedulability του solver — μάθημα
+    //    inactive (active=false) ή invisible (visibleInTimetable=false) ΔΕΝ παγώνει
+    //    (αλλιώς phantom MISSING_HOURS/MISSING_EXAM: στο scope αλλά ποτέ τοποθετημένο).
+    //    Σημ.: null active/visible δεν δοκιμάζεται εδώ (DB NOT NULL)· το null-handling
+    //    του predicate καλύπτεται από το pure-unit CourseRelevanceSchedulabilityTest.
+    // ====================================================================
+    @Test
+    void freeze_alignsWithSolverSchedulability_BL10() {
+        Course inactive  = saveCourseWithFlags("BL10_INACT", false, true);  // active=false
+        Course invisible = saveCourseWithFlags("BL10_INVIS", true, false);  // visibleInTimetable=false
+        Course schedulable = saveCourseWithFlags("BL10_OK",  true, true);
+        Timetable tt = seedTimetableWithScope("BL10");
+
+        List<TimetableScopedCourse> scoped = scopedCourseRepo.findByTimetableId(tt.getId());
+        assertFalse(scopeHasCourse(scoped, inactive),
+                "active=false → μη-schedulable → ΔΕΝ παγώνει (BL-10)");
+        assertFalse(scopeHasCourse(scoped, invisible),
+                "visibleInTimetable=false → μη-schedulable → ΔΕΝ παγώνει (BL-10)");
+        assertTrue(scopeHasCourse(scoped, schedulable),
+                "active & visible → schedulable → παγώνει κανονικά");
+    }
+
+    // ====================================================================
     // Helpers
     // ====================================================================
     private Timetable createViaController(String suffix) {
@@ -171,6 +194,10 @@ class TimetableScopeImmutabilityTest {
     }
 
     private Course saveCourse(String suffix) {
+        return saveCourseWithFlags(suffix, true, true);
+    }
+
+    private Course saveCourseWithFlags(String suffix, Boolean active, Boolean visible) {
         return courseRepo.save(Course.builder()
                 .code(MARK + suffix).name("Scope Test Course " + suffix)
                 .semester(1).studyYear(1)
@@ -178,8 +205,12 @@ class TimetableScopeImmutabilityTest {
                 .lectureHours(2).tutorialHours(0).labHours(0)
                 .expectedStudents(10)
                 .semesterType(Course.SemesterType.FALL)
-                .active(true).visibleInTimetable(true)
+                .active(active).visibleInTimetable(visible)
                 .build());
+    }
+
+    private static boolean scopeHasCourse(List<TimetableScopedCourse> scoped, Course c) {
+        return scoped.stream().anyMatch(s -> c.getId().equals(s.getCourseId()));
     }
 
     @SuppressWarnings("unchecked")

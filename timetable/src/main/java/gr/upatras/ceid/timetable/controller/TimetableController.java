@@ -1219,7 +1219,7 @@ private boolean isExamTimetable(Timetable timetable) {
 }
 
     private boolean isCourseRelevantForTimetable(Course course, Timetable timetable) {
-        return CourseRelevance.isRelevant(course, timetable);
+        return CourseRelevance.isSchedulable(course, timetable);
     }
 
     /** #5: τα ΠΑΓΩΜΕΝΑ scoped μαθήματα του προγράμματος (αντί για live findAll). */

@@ -40,7 +40,7 @@ public class TimetableScopeService {
         if (scopedCourseRepo.existsByTimetableId(timetable.getId())) return 0;
 
         List<TimetableScopedCourse> rows = courseRepo.findByDeletedFalse().stream()
-                .filter(c -> CourseRelevance.isRelevant(c, timetable))
+                .filter(c -> CourseRelevance.isSchedulable(c, timetable))
                 .map(c -> toScopedCourse(timetable, c))
                 .toList();
 
