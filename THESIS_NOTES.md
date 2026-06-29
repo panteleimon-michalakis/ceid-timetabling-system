@@ -896,6 +896,46 @@ per-call· νέο unmapped hard constraint κάνει **fail-loud** (`log.warn`)
 εξαφανίζεται σιωπηλά. Άρα ένας μελλοντικός κανόνας ρέει προσθέτοντας (α) τον constraint
 στον provider και (β) ένα entry στο `ConstraintCodeMapping` — χωρίς άλλη αλλαγή.
 
+## BL-10 — Ευθυγράμμιση frozen scope ↔ solver schedulability (μία authoritative predicate)
+
+### [03987eb] Το σιωπηλό drift που έκλεισε ο ενιαίος ορισμός relevance
+Το #5 note [e5faed1] ισχυρίστηκε «frozen scope ≡ solver candidate set, χωρίς drift» μέσω
+της κοινής `util.CourseRelevance`. Στην πράξη όμως **υπήρχε** drift: το freeze
+(`TimetableScopeService.materializeScopeIfAbsent`) ΚΑΙ το auto-schedule
+(`TimetableController.isCourseRelevantForTimetable`) καλούσαν την `isRelevant`
+(**semester-only**), ενώ **μόνο** ο solver (`SolverService.isCourseRelevant`) φιλτράριζε
+ΕΠΙΠΛΕΟΝ `active` ∧ `visibleInTimetable`. Συνέπεια (phantom): μάθημα `deleted=false`, ίδιο
+εξάμηνο, με `active=false` ή `visibleInTimetable=false` («σε συνεννόηση») **πάγωνε** στο
+scope (το completeness περίμενε ώρες του) αλλά ο solver **δεν** το τοποθετούσε ποτέ →
+ψεύτικο `MISSING_HOURS`/`MISSING_EXAM`.
+
+**Ενοποίηση:** νέα single-source `CourseRelevance.isSchedulable` = `active ∧ visible ∧
+isRelevant`, με **ταυτόσημη null-handling** με τον solver (`flag != null && !flag`). Και τα
+**τρία** call sites (freeze, auto-schedule, solver) την καλούν πλέον — ο ορισμός που το
+e5faed1 υποσχέθηκε γίνεται επιτέλους πραγματικά μοναδικός.
+
+**Solver delegation — GATED (μη σπάσει ο baseline):** το `SolverService.isCourseRelevant`
+έγινε `return isSchedulable(...)` (dedup του τριπλού predicate). **Gate A** (static): σύγκριση
+γραμμή-προς-γραμμή του παλιού inline body με το `isSchedulable` → ταυτόσημο σε αποτέλεσμα για
+κάθε input· κλειδωμένο μόνιμα από `CourseRelevanceSchedulabilityTest` με **144-combo oracle**
+(3 active × 3 visible × 4 cSem × 4 ttSem, αναπαραγωγή του solver body ως reference). **Gate B**
+(runtime): throwaway full weekly solve σε **νέο** πρόγραμμα (cleanup μετά, κανένα dev δεδομένο
+δεν άλλαξε) → **266/266 lessons, hardScore 0** = documented baseline· ConstraintVerifier 37+23
+ανέπαφο. Επειδή το `isCourseRelevant` χρησιμοποιείται **μόνο** στο `buildLessons` candidate-set
+filter, η ισοδυναμία Gate A εγγυάται πανομοιότυπο solver input.
+
+**Forward-only (immutability invariant #1):** το fix αλλάζει ΜΟΝΟ το predicate στο σημείο του
+freeze· ήδη παγωμένα `TimetableScopedCourse` rows μένουν αμετάβλητα (freeze-once). Diagnostic
+(dev DB): **0** inactive + **0** invisible μαθήματα, **0** ήδη παγωμένα phantom-scoped rows →
+κανένα υπάρχον phantom· η διόρθωση είναι forward guard για όταν ο admin κάνει inactive/«σε
+συνεννόηση» κάποιο μάθημα. Tests: `CourseRelevanceSchedulabilityTest` (5· pure-unit, no-DB
+null-handling + εξαντλητική solver equivalence) + `TimetableScopeImmutabilityTest` #6 (freeze
+αποκλείει inactive/invisible, περιλαμβάνει schedulable). Full suite **200/200**.
+
+**Παραμένει ανοιχτό:** ο **report** completeness/hard path διαβάζει ακόμη live course (Option L
+του β2) — πλήρης snapshot-first immutability = BL-11. Το BL-10 αφορά αποκλειστικά την
+ευθυγράμμιση **scope-freeze ↔ solver** (όχι το report).
+
 Ο live editor (`validateAssignment`/place/move) ΔΕΝ αγγίχτηκε (ξεχωριστό rule path).
 Helpers: σβήστηκε μόνο το ορφανό `hasFreeLunchHour`· κρατήθηκαν όσα έχουν άλλους callers.
 Gates: backend 194/194, frontend `tsc -b && vite build` καθαρό.
