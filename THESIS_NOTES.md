@@ -939,3 +939,42 @@ null-handling + εξαντλητική solver equivalence) + `TimetableScopeImmu
 Ο live editor (`validateAssignment`/place/move) ΔΕΝ αγγίχτηκε (ξεχωριστό rule path).
 Helpers: σβήστηκε μόνο το ορφανό `hasFreeLunchHour`· κρατήθηκαν όσα έχουν άλλους callers.
 Gates: backend 194/194, frontend `tsc -b && vite build` καθαρό.
+
+## BL-11 (partial) — Snapshot-first hard validation παγωμένων προγραμμάτων (+ teacher/BL-8 carve-out)
+
+### [6c00af3] Immutability των hard errors σε live edits — εκτός teacher (corrupted snapshot text)
+Το β2 (THE FLIP) άφησε ρητά **Option L**: ο analysis path (`SolverService.buildPlacedSolution`
+→ `analyzeHardViolations` + `ValidationEngineService.toView`) διάβαζε **live**
+`assignment.getCourse()/getRoom()/getTimeSlot()`. Άρα edit μαθήματος/αίθουσας/slot **μετά** τη
+δημιουργία μετατόπιζε αναδρομικά τα hard-validation αποτελέσματα ενός **παγωμένου** προγράμματος
+(αντίθετο με το invariant #1). Λύση: **snapshot-first** (snapshot non-null κερδίζει, αλλιώς live
+fallback — ίδιος κανόνας με το `putSnapshotFirst` render rule) στα hard-relevant πεδία:
+courseCode/Name, **studyYear**, courseType, semester, room (**code/type**/capacity), timeslot
+(**day/hour**).
+
+**Solve path = ιερό:** οι αλλαγές έγιναν σε **ΞΕΧΩΡΙΣΤΟΥΣ** helpers
+(`buildSnapshotRoom`/`buildSnapshotTimeSlot`, ΜΟΝΟ analysis)· το `buildLessons` και οι shared
+mappers `toSolverRoom`/`toSolverTimeSlot` (solve path) **δεν** αγγίχτηκαν → solver baseline
+αμετάβλητος by construction. **Live σκόπιμα** (κανένα hard constraint, κανένα immutability gap):
+expectedStudents (μόνο soft `roomCapacityMatch`), semesterType (inert), exam-prefs (soft/αδρανή
+weekly).
+
+**Teacher carve-out — το εύρημα (γιατί proactive audit > τυφλή υλοποίηση):** πρόσθεσα ένα
+throwaway format-consistency audit στα ΠΡΑΓΜΑΤΙΚΑ 4815 stamped assignments (σαν Gate B στο BL-10)
+αντί να εμπιστευτώ την υπόθεση του spec ότι «τα 16 columns καλύπτουν τα πάντα». Αποκάλυψε ότι το
+`snapshot_teachers_text` είναι **corrupted** από το **BL-8**: το μη-idempotent
+`cleanTeacherDisplayName` (overlapping `.replace("Α. Ηλία","Α. Ηλίας")` ξανα-ταιριάζει το prefix)
+τρέχει μέσα στο `normalizeTeachersTextForDto` του stamper → frozen «Α. Ηλίαςςς (ΕΔΙΠ)». Συνέπεια:
+`teacherKey(snapshot)=ΗΛΙΑΣΣΣ|Α` ≠ `teacherKey(live M2M)=ΗΛΙΑΣ|Α` → **307/4815 (6.4%)** key drift.
+Snapshot-first teacher θα εισήγαγε **TEACHER_CONFLICT regression** σε όλα τα προγράμματα με
+ΕΔΙΠ-διδάσκοντες. **Απόφαση (land safe, defer risk):** teacher keys/names **μένουν live**· ο
+`snapshotTeacherKeys` helper + το format-consistency test (round-trip σε CLEAN synthetic ονόματα,
+περνά) μένουν ως **έτοιμο hook** — το πλήρες teacher immutability = γύρισμα **1 γραμμής** μετά το
+BL-8 fix + clean re-stamp των frozen rows (HIGH-RISK, αγγίζει frozen data → ξεχωριστό task με
+auditor sign-off).
+
+Tests: `SnapshotFirstHelpersTest` (round-trip + live fallback για unstamped row),
+`SnapshotFirstHardValidationTest` (studyYear via REQUIRED_YEAR_CONFLICT + room code/type via
+ROOM_CONFLICT/LAB_ROOM_REQUIRED· assert A==B μετά live edits· teacher mutation **σκόπιμα εκτός**).
+ConstraintVerifier ανέπαφο (37+23), τα 7 `ValidationEngineServiceTest` αμετάβλητα (unstamped seed →
+live fallback → μηδέν regression). Full suite **204/204**.
