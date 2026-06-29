@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { roomService, type RoomConstraintDto } from '../api/services';
 import { useAuth } from '../context/AuthContext';
 import type { Room } from '../types';
+import { getErrorMessage } from '../utils/errors';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -109,8 +110,8 @@ function ConstraintsModal({ room, onClose, onSaved }: {
       setDirty(false);
       onSaved();
       onClose();
-    } catch (e: any) {
-      setError(e?.response?.data?.error ?? 'Σφάλμα αποθήκευσης.');
+    } catch (e) {
+      setError(getErrorMessage(e, 'Σφάλμα αποθήκευσης.'));
     } finally { setSaving(false); }
   }
 
@@ -203,8 +204,8 @@ function RoomModal({ room, onClose, onSaved }: {
       if (isNew) await roomService.create(form as Room);
       else        await roomService.update(form.id!, form as Room);
       onSaved(); onClose();
-    } catch (e: any) {
-      setError(e?.response?.data?.error ?? 'Σφάλμα αποθήκευσης.');
+    } catch (e) {
+      setError(getErrorMessage(e, 'Σφάλμα αποθήκευσης.'));
     } finally { setSaving(false); }
   }
 
@@ -289,6 +290,8 @@ export default function Rooms() {
     roomService.getAll().then(r => setRooms(r.data)).finally(() => setLoading(false));
   }
 
+  // Αρχική φόρτωση δεδομένων στο mount (η load() κάνει setState μετά από await — ασύγχρονα).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
@@ -303,9 +306,9 @@ export default function Rooms() {
       await roomService.delete(r.id);
       setToast('Η αίθουσα διαγράφηκε.');
       load();
-    } catch (err: any) {
-      setToast(err?.response?.data?.error
-        ?? 'Σφάλμα διαγραφής. Η αίθουσα μπορεί να χρησιμοποιείται σε προγράμματα.');
+    } catch (err) {
+      setToast(getErrorMessage(err,
+        'Σφάλμα διαγραφής. Η αίθουσα μπορεί να χρησιμοποιείται σε προγράμματα.'));
     }
   }
 

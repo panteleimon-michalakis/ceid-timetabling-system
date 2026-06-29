@@ -5,6 +5,7 @@ import type { DualListSelection } from '../components/DualListPicker';
 import { useAuth } from '../context/AuthContext';
 import type { Course, Teacher } from '../types';
 import { TEACHER_ROLES } from '../types';
+import { getErrorMessage } from '../utils/errors';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -131,8 +132,8 @@ function CourseModal({ course, onClose, onSaved }: {
       }
       onSaved();
       onClose();
-    } catch (e: any) {
-      setError(e?.response?.data?.error ?? 'Σφάλμα αποθήκευσης.');
+    } catch (e) {
+      setError(getErrorMessage(e, 'Σφάλμα αποθήκευσης.'));
     } finally { setSaving(false); }
   }
 
@@ -281,6 +282,8 @@ export default function Courses() {
       .finally(() => setLoading(false));
   }
 
+  // Αρχική φόρτωση δεδομένων στο mount (η load() κάνει setState μετά από await — ασύγχρονα).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, []);
 
   useEffect(() => {

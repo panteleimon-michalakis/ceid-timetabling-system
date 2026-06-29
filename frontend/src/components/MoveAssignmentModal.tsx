@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { timetableService } from '../api/services';
 import type { TimetableAssignment, Room, TimeSlot } from '../types';
+import { getErrorMessage } from '../utils/errors';
 
 const DAY_LABELS: Record<string, string> = {
   MONDAY: 'Δευτέρα', TUESDAY: 'Τρίτη', WEDNESDAY: 'Τετάρτη',
@@ -87,12 +88,8 @@ export default function MoveAssignmentModal({
       onWarnings?.(result.warnings ?? []);
       onMoved();
       onClose();
-    } catch (err: any) {
-      const msg = err?.response?.data?.error
-        || err?.response?.data?.message
-        || err?.message
-        || 'Σφάλμα κατά τη μετακίνηση.';
-      onError(msg);
+    } catch (err) {
+      onError(getErrorMessage(err, 'Σφάλμα κατά τη μετακίνηση.'));
     } finally {
       setSaving(false);
     }

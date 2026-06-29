@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { timetableService } from '../api/services';
+import type { Timetable } from '../types';
+
+type CreateTimetablePayload = Parameters<typeof timetableService.create>[0];
 
 interface TimetableSelectorProps {
-  timetables: any[];
+  timetables: Timetable[];
   selectedTimetableId: number | null;
   onSelect: (id: number) => void;
-  onCreated: (newTimetable: any) => void;
+  onCreated: (newTimetable: Timetable) => void;
   onDeleted: (id: number) => void;
   disabled: boolean;
   progress?: { percentage?: number; placedHours?: number; totalRequiredHours?: number } | null;
@@ -61,7 +64,7 @@ export default function TimetableSelector({
     setSaving(true);
     setError(null);
     try {
-      const payload: any = {
+      const payload: CreateTimetablePayload = {
         name: newName.trim(),
         academicYear: currentAcademicYear,
         timetableType,
@@ -237,7 +240,7 @@ export default function TimetableSelector({
 
       {/* Timetable cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.75rem' }}>
-        {timetables.map((t: any) => {
+        {timetables.map((t) => {
           const isSelected = selectedTimetableId === t.id;
           const semLabel =
             t.semesterType === 'FALL'      ? 'Χειμερινό' :

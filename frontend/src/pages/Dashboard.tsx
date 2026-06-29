@@ -4,6 +4,7 @@ import api from '../api/client';
 import { healthService, timetableService } from '../api/services';
 import { useAuth } from '../context/AuthContext';
 import type { Timetable } from '../types';
+import { getErrorMessage } from '../utils/errors';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -298,8 +299,8 @@ export default function Dashboard() {
     try {
       await timetableService.publish(id);
       loadAll();
-    } catch (err: any) {
-      setError(err?.response?.data?.error ?? 'Αποτυχία δημοσίευσης.');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Αποτυχία δημοσίευσης.'));
     }
   }
 

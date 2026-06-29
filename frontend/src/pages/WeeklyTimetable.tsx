@@ -8,11 +8,19 @@ import type {
   PlacementOptionsResponse,
   Room,
   TimeSlot,
+  Timetable,
   TimetableAssignment,
   TimetableProgress,
   TimetableValidationReport,
   ValidationIssue,
 } from '../types';
+import { getErrorMessage } from '../utils/errors';
+
+/** Σχήμα μιας εγγραφής από GET /teachers/constraints/all. */
+interface TeacherConstraintEntry {
+  teacherName: string;
+  constraints: Array<{ dayOfWeek: string; hour: number; constraintType: string }>;
+}
 import TimetableSelector from '../components/TimetableSelector';
 import MoveAssignmentModal from '../components/MoveAssignmentModal';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
@@ -110,13 +118,6 @@ const assignmentTypeColors: Record<string, string> = {
 // (assignmentTypeLabelsGenitive αφαιρέθηκε — χρησιμοποιούνταν μόνο στους client
 //  pre-guards του submitManualAssignment, που έγιναν non-blocking στο Feature #2.)
 
-function getErrorMessage(error: any): string {
-  return error?.response?.data?.error
-    || error?.response?.data?.message
-    || error?.message
-    || 'Προέκυψε άγνωστο σφάλμα.';
-}
-
 function normalizeTime(value?: string | null): string {
   if (!value) return '';
   return value.length >= 5 ? value.slice(0, 5) : value;
@@ -175,7 +176,7 @@ function hasHoursForType(course: Course | undefined, type: string) {
   return getRequiredHoursForType(course, type) > 0;
 }
 
-function isCourseRelevantForTimetable(course: Course, timetable: any, yearFilter: number) {
+function isCourseRelevantForTimetable(course: Course, timetable: Timetable | null | undefined, yearFilter: number) {
   if (!timetable) return false;
 
   if (course.semesterType && timetable.semesterType && course.semesterType !== timetable.semesterType) {
@@ -193,7 +194,7 @@ function isCourseRelevantForTimetable(course: Course, timetable: any, yearFilter
 }
 
 export default function WeeklyTimetable() {
-  const [timetables, setTimetables] = useState<any[]>([]);
+  const [timetables, setTimetables] = useState<Timetable[]>([]);
   const [selectedTimetableId, setSelectedTimetableId] = useState<number | null>(null);
 
   const [assignments, setAssignments] = useState<TimetableAssignment[]>([]);
@@ -242,7 +243,7 @@ export default function WeeklyTimetable() {
   const [autoScheduleResult, setAutoScheduleResult] = useState<AutoScheduleResult | null>(null);
 
   const selectedTimetable = useMemo(
-    () => timetables.find((t: any) => t.id === selectedTimetableId),
+    () => timetables.find((t) => t.id === selectedTimetableId),
     [timetables, selectedTimetableId]
   );
 
@@ -394,13 +395,13 @@ const activeHintMap = draggingAssignment ? activeDragMap : slotHintMap;
         courseService.getAll(),
         roomService.getAll(),
         timeSlotService.getAll(),
-        api.get('/teachers/constraints/all').catch(() => ({ data: [] })),
+        api.get<TeacherConstraintEntry[]>('/teachers/constraints/all').catch(() => ({ data: [] as TeacherConstraintEntry[] })),
       ]);
 
-      setTimetables((timetablesRes.data as any[]).filter((t: any) => t.timetableType === 'SEMESTER'));
+      setTimetables(timetablesRes.data.filter((t) => t.timetableType === 'SEMESTER'));
       const tcMap = new Map<string, Array<{dayOfWeek: string; hour: number; constraintType: string}>>();
-      for (const entry of (teacherConRes.data as any[])) {
-        tcMap.set((entry.teacherName as string).toLowerCase(), entry.constraints);
+      for (const entry of teacherConRes.data) {
+        tcMap.set(entry.teacherName.toLowerCase(), entry.constraints);
       }
       setTeacherConstraintsMap(tcMap);
       setCourses(coursesRes.data);
@@ -408,7 +409,7 @@ const activeHintMap = draggingAssignment ? activeDragMap : slotHintMap;
       setTimeSlots(timeSlotsRes.data);
 
 setSelectedTimetableId((previous) => {
-  if (previous && timetablesRes.data.some((timetable: any) => timetable.id === previous)) {
+  if (previous && timetablesRes.data.some((timetable) => timetable.id === previous)) {
     return previous;
   }
 
@@ -575,7 +576,7 @@ async function handleDrop(day: string, hour: string) {
     setMessage(`${moved.course?.name} μετακινήθηκε → ${day} ${hour}${roomMsg}`);
     setWarnings(result.warnings ?? []);
     await loadTimetableData(selectedTimetableId);
-  } catch (err: any) {
+  } catch (err) {
     setError(getErrorMessage(err));
   } finally {
     setSaving(false);
@@ -659,7 +660,7 @@ function handleSelectTimetable(id: number) {
   }
 
 
-function handleTimetableCreated(newTimetable: any) {
+function handleTimetableCreated(newTimetable: Timetable) {
   setTimetables((prev) => [...prev, newTimetable]);
   setSelectedTimetableId(newTimetable.id);
   setAutoScheduleResult(null);
@@ -776,7 +777,7 @@ setAutoScheduleResult(null);
 setMessage('Η ώρα προστέθηκε επιτυχώς.');
 setWarnings(result.warnings ?? []);
 await loadTimetableData(selectedTimetableId);
-    } catch (err: any) {
+    } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setSaving(false);
@@ -806,7 +807,7 @@ await loadTimetableData(selectedTimetableId);
       );
 
       setPlacementOptions(res.data);
-    } catch (err: any) {
+    } catch (err) {
       setPlacementOptions(null);
       setError(getErrorMessage(err));
     } finally {
@@ -832,7 +833,7 @@ await loadTimetableData(selectedTimetableId);
       setMessage('Η προτεινόμενη ανάθεση προστέθηκε επιτυχώς.');
       setPlacementOptions(null);
       await loadTimetableData(selectedTimetableId);
-    } catch (err: any) {
+    } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setSaving(false);
@@ -853,7 +854,7 @@ setMessage('Η ανάθεση διαγράφηκε.');
 setPlacementOptions(null);
 setAutoScheduleResult(null);
 await loadTimetableData(selectedTimetableId);
-    } catch (err: any) {
+    } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setSaving(false);
@@ -887,7 +888,7 @@ async function runAutoSchedule() {
 
     setPlacementOptions(null);
     await loadTimetableData(selectedTimetableId);
-  } catch (err: any) {
+  } catch (err) {
     setError(getErrorMessage(err));
   } finally {
     setScheduling(false);
@@ -904,13 +905,13 @@ async function runSolver() {
 
     try {
       const res = await timetableService.solve(selectedTimetableId, 300);
-      const data = res.data as any;
+      const data = res.data;
       setMessage(
         `Timefold: ${data.totalPlaced} ώρες τοποθετήθηκαν | Hard: ${data.hardScore} | Soft: ${data.softScore} | ${(data.solveTimeMs / 1000).toFixed(1)}s`
       );
       setPlacementOptions(null);
       await loadTimetableData(selectedTimetableId);
-    } catch (err: any) {
+    } catch (err) {
       setError(getErrorMessage(err));
     } finally {
       setScheduling(false);
@@ -1868,25 +1869,25 @@ function AutoScheduleResultPanel({
   validation,
   onClear,
 }: {
-  result: any;
+  result: AutoScheduleResult | null;
   validation: TimetableValidationReport | null;
   onClear: () => void;
 }) {
   const log: string[] = Array.isArray(result?.log) ? result.log : [];
 
-const placedEntries: any[] = Array.isArray(result?.placedEntries) ? result.placedEntries : [];
-const failedEntries: any[] = Array.isArray(result?.failedEntries) ? result.failedEntries : [];
+const placedEntries: AutoPlacedEntry[] = Array.isArray(result?.placedEntries) ? result.placedEntries : [];
+const failedEntries: AutoFailedEntry[] = Array.isArray(result?.failedEntries) ? result.failedEntries : [];
 
 const successLines: string[] =
   placedEntries.length > 0
-    ? placedEntries.map((entry: any) =>
+    ? placedEntries.map((entry) =>
         `${entry.courseCode} ${entry.assignmentType} -> ${entry.day} ${entry.startTime} ${entry.roomCode} (score: ${entry.score})`
       )
     : log.filter((line: string) => !line.startsWith('FAIL') && !line.startsWith('ΑΠΟΤΥΧΙΑ'));
 
 const failureLines: string[] =
   failedEntries.length > 0
-    ? failedEntries.map((entry: any) =>
+    ? failedEntries.map((entry) =>
         `FAIL: ${entry.courseCode} ${entry.assignmentType} - ${entry.mainReason}`
       )
     : log.filter((line: string) => line.startsWith('FAIL') || line.startsWith('ΑΠΟΤΥΧΙΑ'));

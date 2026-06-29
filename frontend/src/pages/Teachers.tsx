@@ -432,7 +432,7 @@ export default function Teachers() {
                     {/* Edit mode: μόνο για ADMIN */}
                     {editing && isAdmin ? (
                       <input
-                        value={(editForm as any)[field] ?? ''}
+                        value={editForm[field] ?? ''}
                         onChange={e => setEditForm(f => ({...f, [field]: e.target.value}))}
                         style={{ ...inputSt, marginBottom: 0 }}
                       />
@@ -662,16 +662,16 @@ export default function Teachers() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {[
-                { label: 'Ονοματεπώνυμο *', field: 'name', placeholder: 'π.χ. Κ. Βλάχος' },
-                { label: 'Email', field: 'email', placeholder: 'email@upatras.gr' },
-                { label: 'Τμήμα', field: 'department', placeholder: 'ΤΜΗΥΠ' },
+                { label: 'Ονοματεπώνυμο *', field: 'name' as const, placeholder: 'π.χ. Κ. Βλάχος' },
+                { label: 'Email', field: 'email' as const, placeholder: 'email@upatras.gr' },
+                { label: 'Τμήμα', field: 'department' as const, placeholder: 'ΤΜΗΥΠ' },
               ].map(({ label, field, placeholder }) => (
                 <div key={field}>
                   <label style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                     {label}
                   </label>
                   <input
-                    value={(addForm as any)[field] ?? ''}
+                    value={addForm[field] ?? ''}
                     onChange={e => setAddForm(f => ({...f, [field]: e.target.value}))}
                     placeholder={placeholder}
                     style={inputSt}

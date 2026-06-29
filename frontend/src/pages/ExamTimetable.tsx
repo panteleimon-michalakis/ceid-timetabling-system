@@ -10,6 +10,7 @@ import TimetableSelector from '../components/TimetableSelector';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 import ValidationIssuesModal from '../components/ValidationIssuesModal';
 import { esc, shortCode, yearColor, todayGreek, buildPrintDocument, openAndPrint, groupItems, parseTeachers, electiveBucket } from '../utils/printTimetable';
+import { getErrorMessage } from '../utils/errors';
 import type { PrintGroupBy } from '../utils/printTimetable';
 import PrintOptionsModal from '../components/PrintOptionsModal';
 import type { PrintRequest } from '../components/PrintOptionsModal';
@@ -161,8 +162,8 @@ function ExamMoveModal({
       onSuccess(`Το μάθημα ${assignment.course?.name} μετακινήθηκε.`);
       onMoved();
       onClose();
-    } catch (err: any) {
-      onError(err?.response?.data?.error || err?.message || 'Σφάλμα μετακίνησης.');
+    } catch (err) {
+      onError(getErrorMessage(err, 'Σφάλμα μετακίνησης.'));
     } finally { setSaving(false); }
   }
 
@@ -420,8 +421,8 @@ export default function ExamTimetable() {
       const res = await timetableService.findOrCreateExamSlot(date, parseInt(hour, 10));
       setExamTimeSlots(prev => [...prev, res.data as unknown as TimeSlot]);
       return res.data.id;
-    } catch (err: any) {
-      setError(err?.response?.data?.error || 'Αδυναμία δημιουργίας χρονοθυρίδας.');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Αδυναμία δημιουργίας χρονοθυρίδας.'));
       return undefined;
     }
   }
@@ -467,8 +468,8 @@ export default function ExamTimetable() {
       setPlacementOptions(null);
       setMessage('Η ανάθεση προστέθηκε επιτυχώς.');
       await reloadTimetableData();
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || 'Σφάλμα αποθήκευσης.');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Σφάλμα αποθήκευσης.'));
     } finally { setSaving(false); }
   }
 
@@ -480,8 +481,8 @@ export default function ExamTimetable() {
       setMessage('Η ανάθεση διαγράφηκε.');
       setPlacementOptions(null);
       await reloadTimetableData();
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || 'Σφάλμα διαγραφής.');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Σφάλμα διαγραφής.'));
     } finally { setSaving(false); }
   }
 
@@ -491,8 +492,8 @@ export default function ExamTimetable() {
     try {
       const res = await timetableService.getPlacementOptions(selectedId, selectedCourseId, 'EXAM');
       setPlacementOptions(res.data);
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || 'Σφάλμα φόρτωσης επιλογών.');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Σφάλμα φόρτωσης επιλογών.'));
     } finally { setLoadingOptions(false); }
   }
 
@@ -510,8 +511,8 @@ export default function ExamTimetable() {
       setPlacementOptions(null);
       setMessage('Η προτεινόμενη ανάθεση προστέθηκε.');
       await reloadTimetableData();
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || 'Σφάλμα.');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Σφάλμα.'));
     } finally { setSaving(false); }
   }
 
@@ -533,8 +534,8 @@ export default function ExamTimetable() {
       await timetableService.moveAssignment(moved.id, { timeSlotId: slotId, roomId });
       setMessage(`${moved.course?.name} μετακινήθηκε → ${date} ${hour}`);
       await reloadTimetableData();
-    } catch (err: any) {
-      setError(err?.response?.data?.error || 'Σφάλμα μετακίνησης.');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Σφάλμα μετακίνησης.'));
     } finally { setSaving(false); }
   }
 
@@ -544,12 +545,12 @@ export default function ExamTimetable() {
     setSolving(true);
     try {
       const res = await timetableService.solve(selectedId, 60);
-      const d = res.data as any;
+      const d = res.data;
       setMessage(`Solver: ${d.totalPlaced} εξετάσεις τοποθετήθηκαν | Hard: ${d.hardScore} | Soft: ${d.softScore}`);
       setPlacementOptions(null);
       await reloadTimetableData();
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || 'Σφάλμα solver.');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Σφάλμα solver.'));
     } finally { setSolving(false); }
   }
 
@@ -790,8 +791,8 @@ export default function ExamTimetable() {
                   const tsRes = await timeSlotService.getExamSlots();
                   setExamTimeSlots(tsRes.data);
                   setMessage('Exam slots δημιουργήθηκαν! Ανανεώθηκε το grid.');
-                } catch (err: any) {
-                  setError(err?.response?.data?.error || 'Σφάλμα δημιουργίας slots.');
+                } catch (err) {
+                  setError(getErrorMessage(err, 'Σφάλμα δημιουργίας slots.'));
                 }
               }}
               disabled={solving || saving}
@@ -810,8 +811,8 @@ export default function ExamTimetable() {
                   await timetableService.clearAssignments(selectedId);
                   await reloadTimetableData();
                   setMessage('Όλες οι αναθέσεις αφαιρέθηκαν.');
-                } catch (err: any) {
-                  setError(err?.response?.data?.error || 'Σφάλμα καθαρισμού αναθέσεων.');
+                } catch (err) {
+                  setError(getErrorMessage(err, 'Σφάλμα καθαρισμού αναθέσεων.'));
                 }
               }}
               disabled={solving || saving || assignments.length === 0}
@@ -835,7 +836,7 @@ export default function ExamTimetable() {
         timetables={timetables}
         selectedTimetableId={selectedId}
         onSelect={setSelectedId}
-        onCreated={(t: any) => { setTimetables(prev => [...prev, t]); setSelectedId(t.id); }}
+        onCreated={(t: Timetable) => { setTimetables(prev => [...prev, t]); setSelectedId(t.id); }}
         onDeleted={(id: number) => { setTimetables(prev => prev.filter(t => t.id !== id)); if (selectedId === id) setSelectedId(null); }}
         disabled={saving || solving}
         progress={progress}

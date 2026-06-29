@@ -20,11 +20,20 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
 
+  function logout() {
+    localStorage.removeItem('jwt');
+    localStorage.removeItem('user');
+    delete api.defaults.headers.common['Authorization'];
+    setUser(null);
+  }
+
   useEffect(() => {
     const token    = localStorage.getItem('jwt');
     const userData = localStorage.getItem('user');
     if (token && userData) {
       try {
+        // Επαναφορά συνεδρίας από localStorage στο mount (συγχρονισμός με εξωτερικό store).
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setUser(JSON.parse(userData));
         api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       } catch { logout(); }
@@ -40,13 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(userData as AuthUser);
   }
 
-  function logout() {
-    localStorage.removeItem('jwt');
-    localStorage.removeItem('user');
-    delete api.defaults.headers.common['Authorization'];
-    setUser(null);
-  }
-
   return (
     <AuthContext.Provider value={{ user, login, logout, isAuthenticated: !!user }}>
       {children}
@@ -54,6 +56,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// Ο κανόνας react-refresh/only-export-components αφορά αποκλειστικά το Fast Refresh
+// (HMR) στο dev — δεν έχει καμία επίδραση στο runtime/production build. Το context
+// file εξάγει σκόπιμα και το hook μαζί με τον provider (καθιερωμένο pattern).
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');

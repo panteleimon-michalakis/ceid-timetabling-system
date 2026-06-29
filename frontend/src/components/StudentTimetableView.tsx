@@ -73,6 +73,8 @@ export default function StudentTimetableView({
     if (selectedTtId == null) return;
     try {
       const saved = localStorage.getItem(PERSONAL_KEY(selectedTtId));
+      // Συγχρονισμός state από εξωτερικό store (localStorage) όταν αλλάζει το πρόγραμμα.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedCourses(saved ? new Set(JSON.parse(saved)) : new Set());
     } catch { setSelectedCourses(new Set()); }
     setYearFilter(null);
@@ -83,7 +85,7 @@ export default function StudentTimetableView({
       const next = new Set(prev);
       if (next.has(courseId)) next.delete(courseId); else next.add(courseId);
       if (selectedTtId) {
-        try { localStorage.setItem(PERSONAL_KEY(selectedTtId), JSON.stringify([...next])); } catch {}
+        try { localStorage.setItem(PERSONAL_KEY(selectedTtId), JSON.stringify([...next])); } catch { /* localStorage μη διαθέσιμο — αγνοούμε */ }
       }
       return next;
     });
@@ -249,7 +251,7 @@ export default function StudentTimetableView({
         <div style={{ padding: '14px 20px', borderBottom: '1px solid #1a2744' }}>
             <div style={{ display: 'flex', background: '#0d1b2e', borderRadius: '8px', padding: '3px', border: '1px solid #1a2744' }}>
               {([['all','Τμήματος'],['personal','Δικό μου']] as const).map(([m, label]) => (
-                <button key={m} onClick={() => setMode(m as any)} style={{
+                <button key={m} onClick={() => setMode(m)} style={{
                   flex: 1, padding: '6px 8px', border: 'none', borderRadius: '6px', cursor: 'pointer',
                   background: mode === m ? '#1d4ed8' : 'transparent',
                   color: mode === m ? '#fff' : '#475569',
@@ -293,7 +295,7 @@ export default function StudentTimetableView({
               {selectedCourses.size > 0 && (
                 <button onClick={() => {
                   setSelectedCourses(new Set());
-                  if (selectedTtId) try { localStorage.removeItem(PERSONAL_KEY(selectedTtId)); } catch {}
+                  if (selectedTtId) try { localStorage.removeItem(PERSONAL_KEY(selectedTtId)); } catch { /* localStorage μη διαθέσιμο — αγνοούμε */ }
                 }} style={{
                   fontSize: '10px', color: '#475569', background: 'none', border: 'none',
                   cursor: 'pointer', fontFamily: "'IBM Plex Sans', sans-serif",
