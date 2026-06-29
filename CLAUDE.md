@@ -231,7 +231,7 @@ live-relevance πρέπει να συμφωνούν· αλλιώς είναι α
 (συμπεριλάμβανε 2 soft-deleted relevant της dev DB). Fix: recount με `findByDeletedFalse()`
 → match by construction. Η παράλληλη active/visible απόκλιση → [BL-10].
 
-**[BL-10] Δύο ορισμοί relevance — scope-freeze (semester-only) vs solver (semester + active + visibleInTimetable)**
+**[BL-10] Δύο ορισμοί relevance — scope-freeze (semester-only) vs solver — ✅ RESOLVED (03987eb)**
 Το `TimetableScopeService.materializeScopeIfAbsent` παγώνει με `CourseRelevance.isRelevant`
 (semester-only), ενώ ο solver (`SolverService.isCourseRelevant`) φιλτράρει ΕΠΙΠΛΕΟΝ
 `active=false` και `visibleInTimetable=false`. Συνέπεια: μη-διαγραμμένο, semester-relevant
@@ -240,6 +240,20 @@ completeness περιμένει ώρες του) αλλά ο solver ΔΕΝ το 
 MISSING_HOURS. Ξεχωριστή απόκλιση από BL-9 (ΔΕΝ προκαλεί το 61-vs-59 — καμία πλευρά του test
 δεν φιλτράρει active/visible). Δένει με τη Φάση 2 (solver↔validation unification). Λύση:
 ενοποίηση των δύο relevance ορισμών σε μία authoritative πηγή. Tier: 🔵.
+
+**RESOLVED (03987eb):** Νέα single-source predicate `CourseRelevance.isSchedulable`
+(`active ∧ visible ∧ isRelevant`, ταυτόσημη null-handling με τον solver). Και τα **τρία**
+call sites την καλούν πλέον: (α) scope freeze, (β) auto-schedule wrapper
+(`isCourseRelevantForTimetable`), (γ) ο solver — `SolverService.isCourseRelevant` έγινε
+delegation (dedup). GATED: Gate A static equivalence γραμμή-προς-γραμμή (κλειδωμένο με
+144-combo oracle test) + Gate B throwaway full weekly solve **266/266 @ hardScore 0**
+(baseline ανέπαφο, ConstraintVerifier 37+23 ανέπαφο). **Forward-only** λόγω freeze-once: ήδη
+παγωμένα scope rows μένουν αμετάβλητα (invariant #1) — η ευθυγράμμιση ισχύει για νέα
+προγράμματα. Diagnostic (dev DB): **0** inactive + **0** invisible μαθήματα, **0** ήδη
+παγωμένα phantom-scoped rows → κανένα υπάρχον phantom· το fix είναι forward guard. Tests:
+`CourseRelevanceSchedulabilityTest` (5) + `TimetableScopeImmutabilityTest` #6· full suite
+200/200. Βλ. THESIS_NOTES [03987eb]. Παραμένει ανοιχτό: ο **report** completeness path
+(snapshot-first hard validation) → [BL-11].
 
 **[BL-11] Snapshot-first hard validation (πλήρης immutability παλιών προγραμμάτων)**
 Οι hard checks (report ΚΑΙ μηχανή Φ-SV1) διαβάζουν live `assignment.getCourse()`. Άρα
