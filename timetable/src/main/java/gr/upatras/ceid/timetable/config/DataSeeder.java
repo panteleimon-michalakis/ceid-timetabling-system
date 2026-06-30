@@ -105,10 +105,10 @@ public class DataSeeder implements CommandLineRunner {
     // -----------------------------------------------------------------------
     private void seedUsers() {
         upsertUser("admin", "Διαχειριστής CEID", "admin@ceid.upatras.gr", User.Role.ADMIN, null);
-        upsertUser("tsichlas", "Κωνσταντίνος Τσίχλας", "tsichlas@gmail.com", User.Role.TEACHER, "ΕΘ");
+        upsertUser("tsichlas", "Κωνσταντίνος Τσίχλας", "tsichlas@ceid.upatras.gr", User.Role.TEACHER, "ΕΘ");
         upsertUser("megalooikonomou", "Βασίλειος Μεγαλοοικονόμου", "vasilis@ceid.upatras.gr", User.Role.TEACHER, "ΛΥ");
         upsertUser("makris", "Χρήστος Μακρής", "makri@ceid.upatras.gr", User.Role.TEACHER, "ΛΥ");
-        upsertUser("vergos", "Χαρίδημος Βέργος", "h.t.vergos@gmail.com", User.Role.TEACHER, "ΥΑ");
+        upsertUser("vergos", "Χαρίδημος Βέργος", "vergos@ceid.upatras.gr", User.Role.TEACHER, "ΥΑ");
     }
 
     private void upsertUser(String username, String fullName, String email, User.Role role, String sector) {
