@@ -10,7 +10,7 @@ import { getErrorMessage } from '../utils/errors';
 
 interface HealthData {
   status: string; application: string;
-  rooms: number; courses: number; users: number;
+  rooms: number; courses: number;
 }
 
 interface TimetableStat {

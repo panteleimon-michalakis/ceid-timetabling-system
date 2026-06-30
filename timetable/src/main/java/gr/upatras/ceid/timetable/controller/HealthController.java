@@ -12,12 +12,10 @@ public class HealthController {
 
     private final RoomRepository roomRepo;
     private final CourseRepository courseRepo;
-    private final UserRepository userRepo;
 
-    public HealthController(RoomRepository roomRepo, CourseRepository courseRepo, UserRepository userRepo) {
+    public HealthController(RoomRepository roomRepo, CourseRepository courseRepo) {
         this.roomRepo = roomRepo;
         this.courseRepo = courseRepo;
-        this.userRepo = userRepo;
     }
 
     @GetMapping("/health")
@@ -26,8 +24,7 @@ public class HealthController {
             "status", "OK",
             "application", "CEID Timetable",
             "rooms", roomRepo.count(),
-            "courses", courseRepo.count(),
-            "users", userRepo.count()
+            "courses", courseRepo.count()
         );
     }
 }
