@@ -4,6 +4,7 @@ import gr.upatras.ceid.timetable.entity.User;
 import gr.upatras.ceid.timetable.repository.UserRepository;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -12,6 +13,7 @@ import java.time.LocalDateTime;
 
 @Component
 @Order(1)
+@Profile("!prod") // default creds (admin/admin123 κ.λπ.) σπέρνονται σε dev+test, ΟΧΙ σε prod
 public class UserSeeder implements ApplicationRunner {
 
     private final UserRepository userRepo;
