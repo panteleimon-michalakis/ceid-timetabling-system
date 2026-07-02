@@ -1813,6 +1813,7 @@ if (examTimetable
 
         List<TimetableAssignment> currentAssignments = new ArrayList<>(assignmentRepo.findByTimetableId(id));
         Map<Long, Set<String>> courseTeacherKeyMap = buildCourseTeacherKeyMap(allCourses);
+        Map<Long, List<RoomConstraint>> roomConstraintMap = buildRoomConstraintMap(rooms);
 
         int totalPlaced = 0;
         int totalFailed = 0;
@@ -1860,7 +1861,8 @@ if (examTimetable
                                     room,
                                     slot,
                                     assignmentType,
-                                    courseTeacherKeyMap
+                                    courseTeacherKeyMap,
+                                    roomConstraintMap
                             );
 
                             if (!blockingReasons.isEmpty()) {
@@ -2003,7 +2005,8 @@ if (examTimetable
             Room room,
             TimeSlot timeSlot,
             TimetableAssignment.AssignmentType assignmentType,
-            Map<Long, Set<String>> courseTeacherKeyMap) {
+            Map<Long, Set<String>> courseTeacherKeyMap,
+            Map<Long, List<RoomConstraint>> roomConstraintMap) {
 
         List<String> reasons = new ArrayList<>();
 
@@ -2044,8 +2047,9 @@ if (examTimetable
             reasons.add("Το μάθημα ανήκει σε άλλο εξάμηνο");
         }
 
-        // Δεσμευμένες ώρες αίθουσας
-        if (roomBlockedMessage(room, timeSlot) != null) {
+        // Δεσμευμένες ώρες αίθουσας (in-memory lookup — hot loop, βλ. roomConstraintMap)
+        List<RoomConstraint> roomConstraints = roomConstraintMap.getOrDefault(room.getId(), List.of());
+        if (roomBlockedMessage(room, timeSlot, roomConstraints) != null) {
             reasons.add("Η αίθουσα είναι δεσμευμένη αυτή την ώρα");
         }
 
@@ -2178,6 +2182,30 @@ private Map<Long, Set<String>> buildCourseTeacherKeyMap(List<Course> courses) {
             }
         } catch (Exception e) {
             // If all DB relations fail, teachersText keys are still in the map
+        }
+
+        return map;
+    }
+
+    // Ίδιο pattern με buildCourseTeacherKeyMap: μία bulk query πριν το hot loop
+    // του autoSchedule, ώστε το roomBlockedMessage να κάνει in-memory lookup
+    // αντί για ζωντανή repo query ανά (room, slot) συνδυασμό (βλ. E-1 fix).
+    private Map<Long, List<RoomConstraint>> buildRoomConstraintMap(List<Room> rooms) {
+        Map<Long, List<RoomConstraint>> map = new HashMap<>();
+        Set<Long> roomIds = rooms.stream()
+                .map(Room::getId)
+                .filter(id -> id != null)
+                .collect(Collectors.toSet());
+
+        for (RoomConstraint constraint : roomConstraintRepo.findAllWithRoom()) {
+            if (constraint.getRoom() == null || constraint.getRoom().getId() == null) {
+                continue;
+            }
+            Long roomId = constraint.getRoom().getId();
+            if (!roomIds.contains(roomId)) {
+                continue;
+            }
+            map.computeIfAbsent(roomId, ignored -> new ArrayList<>()).add(constraint);
         }
 
         return map;
@@ -2319,12 +2347,21 @@ private Map<Long, Set<String>> buildCourseTeacherKeyMap(List<Course> courses) {
      * Καλύπτει 1ωρα εβδομαδιαία slots και 3ωρα exam slots.
      */
     private String roomBlockedMessage(Room room, TimeSlot timeSlot) {
+        if (room == null) return null;
+        return roomBlockedMessage(room, timeSlot, roomConstraintRepo.findByRoomId(room.getId()));
+    }
+
+    /**
+     * Overload για hot loops (π.χ. autoSchedule): δέχεται τα constraints ήδη
+     * φορτωμένα (βλ. buildRoomConstraintMap) αντί να κάνει ζωντανή repo query
+     * ανά κλήση — βλ. E-1 fix.
+     */
+    private String roomBlockedMessage(Room room, TimeSlot timeSlot, List<RoomConstraint> constraints) {
         if (room == null || timeSlot == null || timeSlot.getDayOfWeek() == null
                 || timeSlot.getStartTime() == null || timeSlot.getEndTime() == null) {
             return null;
         }
-        List<RoomConstraint> constraints = roomConstraintRepo.findByRoomId(room.getId());
-        if (constraints.isEmpty()) return null;
+        if (constraints == null || constraints.isEmpty()) return null;
 
         String day = timeSlot.getDayOfWeek().name();
         int startHour = timeSlot.getStartTime().getHour();
