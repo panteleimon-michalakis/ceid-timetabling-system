@@ -75,7 +75,10 @@ public class RoomController {
      */
     @GetMapping
     public List<Room> getAll() {
-        return roomRepo.findAll().stream()
+        // S1 soft-delete: κρύβουμε τις απενεργοποιημένες (active=false) αίθουσες
+        // από τη λίστα διαχείρισης — συνεπές με solver/placement (active-aware
+        // reads) και με τα μαθήματα (findByDeletedFalse).
+        return roomRepo.findByActiveTrue().stream()
                 .sorted(Comparator
                         .comparingInt((Room r) -> r.getRoomType() == null
                                 ? Integer.MAX_VALUE : r.getRoomType().ordinal())

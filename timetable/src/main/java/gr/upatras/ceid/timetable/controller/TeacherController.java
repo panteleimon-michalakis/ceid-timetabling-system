@@ -81,7 +81,9 @@ public class TeacherController {
      */
     @GetMapping
     public List<Teacher> getAll() {
-        return teacherRepo.findAll().stream()
+        // S1 soft-delete: κρύβουμε τους απενεργοποιημένους (active=false)
+        // καθηγητές από τη λίστα — συνεπές με RoomController + τα μαθήματα.
+        return teacherRepo.findByActiveTrue().stream()
                 .sorted(Comparator
                         .comparingInt((Teacher t) -> t.getTeacherType() == null
                                 ? Integer.MAX_VALUE : t.getTeacherType().ordinal())
