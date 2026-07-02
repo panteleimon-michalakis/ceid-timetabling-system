@@ -978,3 +978,64 @@ Tests: `SnapshotFirstHelpersTest` (round-trip + live fallback για unstamped r
 ROOM_CONFLICT/LAB_ROOM_REQUIRED· assert A==B μετά live edits· teacher mutation **σκόπιμα εκτός**).
 ConstraintVerifier ανέπαφο (37+23), τα 7 `ValidationEngineServiceTest` αμετάβλητα (unstamped seed →
 live fallback → μηδέν regression). Full suite **204/204**.
+
+## E2E exploratory findings — fixes (μετά το batch soft-delete/drag-drop)
+
+### [d642987] E-1 — auto-schedule unbounded hang (hot-loop live query → auto-flush cascade)
+Το `TimetableController.autoSchedule()` (`@Transactional`) καλούσε `roomBlockedMessage(room,
+timeSlot)` μέσα σε τριπλά φωλιασμένο loop (course × hour × slot × room)· η μέθοδος έκανε
+**ζωντανή** `roomConstraintRepo.findByRoomId(...)` ανά κλήση. Επειδή όλη η μέθοδος είναι ένα
+tx, κάθε query πυροδοτούσε πλήρες Hibernate auto-flush (dirty-check σε ΟΛΕΣ τις managed
+entities) → με δεκάδες χιλιάδες candidate συνδυασμούς σε dataset ~60 μαθημάτων, ουσιαστικά
+unbounded (>5 λεπτά, CPU-bound, jstack ίδιο stack σε 3 dumps). Ίδιο ΑΚΡΙΒΩΣ pattern με ήδη
+λυμένο teacher-side (`courseTeacherKeyMap`). Fix: `buildRoomConstraintMap(rooms)` bulk-fetch
+πριν το loop (`roomConstraintRepo.findAllWithRoom()`, ήδη υπάρχον query) + νέο 3-arg
+`roomBlockedMessage(room, timeSlot, constraints)` overload για in-memory lookup στο hot loop·
+το προϋπάρχον 2-arg call site (`validateAssignment`, single-lookup, όχι hot loop) έμεινε ζωντανό
+query χωρίς αλλαγή. `FlushMode` **δεν** χρειάστηκε — το hoisting μόνο του έλυσε πλήρως.
+Verify: API end-to-end ~10s (was >300s/unbounded) σε 2 fresh timetables, ΚΑΙ πραγματικό admin UI
+μέσω claude-in-chrome (2 νέα προγράμματα, κουμπί «Αυτόματη Τοποθέτηση», καμία κρεμάλα)·
+`totalPlaced`/`totalFailed`/`totalSkipped`/`totalCourses` πανομοιότυπα και στα 2 API runs
+(196/70/0/58)· ξεχωριστό `/validation` (errorCount/warningCount 40/29) επιβεβαιώθηκε ίδιο στο
+UI run. Νέο permanent test: `AutoSchedulePerformanceTest` (ρεαλιστικού μεγέθους seed, assert
+<30s + κανένα assignment σε BLOCKED room-slot). Full suite 220/220. Canonical `id=1` (266
+αναθέσεις) ανέπαφο.
+
+### [58a54b4] E-6 — SolverWeights race: κοινό static mutable map σε ταυτόχρονα solve/analyze
+Θεωρία (πριν οποιαδήποτε αλλαγή): το reported `IllegalArgumentException: Unknown constraint
+weight key: WEEKLY_PREFER_NORMAL_HOURS` δεν οφειλόταν σε λείπον/typo key (υπάρχει κανονικά στο
+CATALOG, literal string στο call site — αποκλείστηκε ρητά η εναλλακτική «DB row typo», αφού το
+`w()` δεν παίρνει ποτέ input από τη ΒΔ) αλλά σε race: `SolverWeights.WEIGHTS` ήταν **static
+mutable HashMap** κοινό σε όλο το JVM, με σχόλιο-υπόθεση στον κώδικα «σειριακά solves, καμία
+πραγματική concurrency» — λάθος υπόθεση, αφού `SolverService.solve()`/`analyzeHardViolations()`
+τρέχουν σε **request threads** (Spring MVC), όχι σειριακά. `resetToDefaults()` έκανε μη-ατομικό
+`clear()`+`putAll()`.
+
+**Επιβεβαίωση (ΠΡΙΝ το fix):** temporary (μη-committed) concurrency test — writer threads σε
+βρόχο `resetToDefaults()`+`applyOverride()`, reader threads σε tight-loop `w(...)`, 5s stress —
+αναπαρήγαγε αξιόπιστα (4/4 runs) το ΑΚΡΙΒΩΣ ίδιο exception. Αποκάλυψε ΚΑΙ δεύτερο, χειρότερο
+effect: writer-vs-writer race έκανε το `applyOverride()` να αγνοεί σιωπηλά valid keys ως
+"unknown" (μαζικά `log.warn`) ενόσω έτρεχε ταυτόχρονο reset άλλου thread — δηλαδή δύο ταυτόχρονα
+solves θα μπορούσαν να αλλοιώσουν σιωπηλά ο ένας τα configured βάρη του άλλου, χωρίς καν
+exception. Πριν το fix επιβεβαιώθηκε ρητά ότι κάθε solve/analyze τρέχει **εξ ολοκλήρου** σε ένα
+thread (low-level blocking `Solver.solve()` API, καμία χρήση `SolverManager`/`moveThreadCount`
+πουθενά στο codebase) — άρα καμία same-solve cross-thread ανάγνωση βαρών.
+
+**Fix:** επιλογή (α) από τις 3 προτεινόμενες (ThreadLocal) — `WEIGHTS` έγινε
+`ThreadLocal<Map<String,Integer>>` (`withInitial` → φρέσκο αντίγραφο DEFAULTS ανά thread)·
+`w`/`applyOverride`/`resetToDefaults` διαβάζουν/γράφουν στο thread-local αντίγραφο. Καμία αλλαγή
+δημόσιου API. Απορρίφθηκε η (β) synchronized/lock ρητά: το `w()` καλείται μέσα σε ΚΑΘΕ constraint
+stream evaluation του solve loop — lock εκεί θα επανέφερε ανάλογο performance πρόβλημα με το
+μόλις διορθωμένο E-1, από άλλη πόρτα.
+
+**Verify:** το ίδιο stress test ξανά μετά το fix → **0/0 exceptions** στην ίδια διάρκεια (ήταν
+4/4 πριν). Sanity single-thread (reset→override→reset) ταυτόσημο με πριν. Πραγματικό solve
+end-to-end σε νέο TEST timetable (πλήρες FALL dataset, 30s budget) → 266/266 lessons placed,
+ολοκληρώθηκε κανονικά (hardScore -1 όχι 0 σε αυτό το run — αναμενόμενη στοχαστική διαφορά λόγω
+απουσίας fixed random seed στο SolverConfig, ΟΧΙ σχετιζόμενη με το fix). Η αυστηρή απόδειξη «καμία
+τιμή βάρους δεν άλλαξε σε normal single-solve» είναι το αμετάβλητο ConstraintVerifier suite
+(37+23 tests, exact score deltas ανά κανόνα) — πέρασε 100% απαράλλαχτο, πολύ ισχυρότερη απόδειξη
+από μια στοχαστική full-solve σύγκριση. Νέο permanent test: `SolverWeightsConcurrencyTest` (3
+writer + 5 reader threads, 2s stress, assert μηδέν exceptions· + single-thread sanity). Full
+suite 222/222. Side finding χρήσιμο για E-3: DELETE ως ADMIN σε πρόγραμμα status=SOLVED (όχι
+DRAFT) πέτυχε καθαρά (204) — καμία status-based 403 στην πράξη.
