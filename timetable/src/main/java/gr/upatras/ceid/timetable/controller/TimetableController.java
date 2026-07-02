@@ -446,7 +446,14 @@ public ResponseEntity<?> getPlacementOptions(
     for (TimeSlot timeSlot : timeSlots) {
         for (Room room : rooms) {
 
-            ResponseEntity<?> validationError = validateAssignment(
+            // Feature #3: το `allowed` του hint βασίζεται στο ΙΔΙΟ hard gate με
+            // το drop (validateStructural — οι 3 δομικοί έλεγχοι που ΜΠΛΟΚΑΡΟΥΝ
+            // στο place/move). Το πλήρες validateAssignment (16 έλεγχοι:
+            // συγκρούσεις, δεσμευμένες ώρες κ.λπ.) γίνεται advisory `warning`,
+            // ΟΧΙ block — ώστε το χρώμα του hint να ταιριάζει με το τι θα κάνει
+            // πράγματι το drop. ΚΑΜΙΑ αλλαγή στη λογική των δύο μεθόδων: μόνο η
+            // σύνθεσή τους εδώ αλλάζει (ίδιο μοτίβο με το add/move gate).
+            ResponseEntity<?> structuralError = validateStructural(
                     timetable,
                     course,
                     room,
@@ -454,7 +461,21 @@ public ResponseEntity<?> getPlacementOptions(
                     parsedAssignmentType
             );
 
-            boolean allowed = validationError == null;
+            boolean allowed = structuralError == null;
+
+            // advisory warning μόνο για δομικά-επιτρεπτά slots: το πρώτο
+            // scheduling-constraint issue, ταυτόσημο με τα drop warnings.
+            String warning = null;
+            if (allowed) {
+                ResponseEntity<?> advisory = validateAssignment(
+                        timetable,
+                        course,
+                        room,
+                        timeSlot,
+                        parsedAssignmentType
+                );
+                warning = advisory != null ? getValidationErrorText(advisory) : null;
+            }
 
             Map<String, Object> option = new LinkedHashMap<>();
             option.put("allowed", allowed);
@@ -463,9 +484,10 @@ public ResponseEntity<?> getPlacementOptions(
                     : 0);
             option.put("room", roomToDto(room));
             option.put("timeSlot", timeSlotToDto(timeSlot));
+            option.put("warning", warning);
 
             if (allowed) {
-                option.put("status", "ALLOWED");
+                option.put("status", warning != null ? "WARNING" : "ALLOWED");
                 option.put("reasons", buildAllowedPlacementReasons(
         timetable,
         course,
@@ -476,7 +498,7 @@ public ResponseEntity<?> getPlacementOptions(
 ));
             } else {
                 option.put("status", "BLOCKED");
-                option.put("reasons", List.of(getValidationErrorText(validationError)));
+                option.put("reasons", List.of(getValidationErrorText(structuralError)));
             }
 
             options.add(option);
