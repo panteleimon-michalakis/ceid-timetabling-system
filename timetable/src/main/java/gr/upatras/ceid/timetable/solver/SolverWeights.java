@@ -28,9 +28,19 @@ import java.util.Map;
  * Δομή για το S4b-2b: τα lookups διαβάζουν από εσωτερικό mutable map
  * αρχικοποιημένο στα defaults· το S4b-2b θα επικαλύπτει τιμές από τη ΒΔ ΧΩΡΙΣ να
  * αγγίξει τα call sites (ίδιο overlay-on-defaults μοτίβο με τα
- * TeacherAvailabilityConstraints/RoomAvailabilityConstraints). Τα solves είναι
- * σειριακά (ένα SolverFactory ανά solve) — global mutable static χωρίς
- * concurrency στην πράξη.
+ * TeacherAvailabilityConstraints/RoomAvailabilityConstraints).
+ *
+ * E-6 fix: το map ήταν αρχικά ένα κοινό static mutable HashMap — υπόθεση «σειρια-
+ * κά solves, καμία πραγματική concurrency» που αποδείχτηκε λάθος (SolverService.solve()/
+ * analyzeHardViolations() καλούνται από request threads, δύο ταυτόχρονα requests =
+ * δύο ταυτόχρονα resetToDefaults()+applyOverride() vs w() στο ΙΔΙΟ map, race
+ * αναπαράχθηκε: reader βλέπει άδειο map μεσω του μη-ατομικού clear()+putAll() →
+ * IllegalArgumentException, ΚΑΙ writer-vs-writer race κάνει applyOverride() να
+ * αγνοεί σιωπηλά valid keys ως "unknown" ενόσω τρέχει ταυτόχρονο reset). Λύση:
+ * {@link ThreadLocal} — κάθε solve/analyze τρέχει (επιβεβαιωμένο: Solver.solve()
+ * low-level blocking API, χωρίς SolverManager/moveThreadCount) εξ ολοκλήρου στο
+ * thread του αιτήματος, άρα ένα thread-local map ανά thread αποκλείει πλήρως το
+ * race χωρίς κανένα lock στο hot path του solve.
  */
 public final class SolverWeights {
 
@@ -57,8 +67,13 @@ public final class SolverWeights {
     /** Compiled defaults (key -> weight), παραγόμενα από το catalog. Immutable. */
     private static final Map<String, Integer> DEFAULTS = buildDefaults(CATALOG);
 
-    /** Live βάρη: defaults αρχικά· το S4b-2b επικαλύπτει DB τιμές εδώ. */
-    private static final Map<String, Integer> WEIGHTS = new HashMap<>(DEFAULTS);
+    /**
+     * Live βάρη: defaults αρχικά· το S4b-2b επικαλύπτει DB τιμές εδώ. ThreadLocal
+     * (E-6 fix) — κάθε thread (=κάθε request-scoped solve/analyze) έχει το δικό
+     * του απομονωμένο, mutable αντίγραφο· κανένα cross-thread race στο clear+putAll.
+     */
+    private static final ThreadLocal<Map<String, Integer>> WEIGHTS =
+            ThreadLocal.withInitial(() -> new HashMap<>(DEFAULTS));
 
     private static List<Def> buildCatalog() {
         List<Def> c = new ArrayList<>();
@@ -197,7 +212,7 @@ public final class SolverWeights {
      * (που θα απενεργοποιούσε τον κανόνα).
      */
     public static int w(String key) {
-        Integer v = WEIGHTS.get(key);
+        Integer v = WEIGHTS.get().get(key);
         if (v == null) {
             throw new IllegalArgumentException("Unknown constraint weight key: " + key);
         }
@@ -211,11 +226,12 @@ public final class SolverWeights {
      * mutable map· {@link #resetToDefaults()} επαναφέρει στα defaults.
      */
     public static void applyOverride(String key, int weight) {
-        if (!WEIGHTS.containsKey(key)) {
+        Map<String, Integer> weights = WEIGHTS.get();
+        if (!weights.containsKey(key)) {
             log.warn("Ignoring weight override for unknown constraint key: {}", key);
             return;
         }
-        WEIGHTS.put(key, weight);
+        weights.put(key, weight);
     }
 
     /** HARD score στο βάρος του κανόνα (για base-score constraints, «Στυλ-1»). */
@@ -229,13 +245,12 @@ public final class SolverWeights {
     }
 
     /**
-     * Επαναφορά των in-memory βαρών στα compiled defaults. Forward-safety για
-     * το DB overlay του S4b-2b: τα *ConstraintProviderTest το καλούν στο
-     * {@code @AfterEach} ώστε ένα test που (μελλοντικά) αλλάζει βάρος να μη
-     * «μολύνει» τα επόμενα. Σήμερα (χωρίς overlay) είναι ουσιαστικά no-op.
+     * Επαναφορά των in-memory βαρών (του ΤΡΕΧΟΝΤΟΣ thread — βλ. E-6) στα compiled
+     * defaults. Forward-safety για το DB overlay του S4b-2b: τα
+     * *ConstraintProviderTest το καλούν στο {@code @AfterEach} ώστε ένα test που
+     * αλλάζει βάρος να μη «μολύνει» τα επόμενα στο ίδιο thread.
      */
     public static void resetToDefaults() {
-        WEIGHTS.clear();
-        WEIGHTS.putAll(DEFAULTS);
+        WEIGHTS.set(new HashMap<>(DEFAULTS));
     }
 }
