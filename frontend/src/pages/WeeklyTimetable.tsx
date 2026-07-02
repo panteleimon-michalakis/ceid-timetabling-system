@@ -127,6 +127,31 @@ function assignmentKey(dayOfWeek: string, startTime: string) {
   return `${dayOfWeek}-${normalizeTime(startTime)}`;
 }
 
+/** Feature #3: 3-state hint ανά slot (πράσινο/amber/κόκκινο). */
+type SlotHint = 'allowed' | 'warning' | 'blocked';
+
+/**
+ * Feature #3: χτίζει 3-state hint map ανά slot από τα placement options (ένα
+ * option ανά αίθουσα). Priority ανά slot: 'allowed' (υπάρχει ≥1 καθαρή αίθουσα) >
+ * 'warning' (δομικά ΟΚ αλλά με advisory issue) > 'blocked' (καμία αίθουσα δεν
+ * περνά τους δομικούς ελέγχους). Ταιριάζει με το drop gate: κόκκινο = θα
+ * μπλοκάρει· amber = θα περάσει με προειδοποίηση· πράσινο = καθαρό.
+ */
+function buildSlotHintMap(resp: PlacementOptionsResponse | null): Map<string, SlotHint> {
+  const map = new Map<string, SlotHint>();
+  if (!resp) return map;
+  for (const option of resp.options) {
+    if (!option.timeSlot?.dayOfWeek || !option.timeSlot?.startTime) continue;
+    const key = assignmentKey(option.timeSlot.dayOfWeek, option.timeSlot.startTime);
+    const state: SlotHint = !option.allowed ? 'blocked' : option.warning ? 'warning' : 'allowed';
+    const cur = map.get(key);
+    if (state === 'allowed') map.set(key, 'allowed');
+    else if (state === 'warning') { if (cur !== 'allowed') map.set(key, 'warning'); }
+    else if (cur === undefined) map.set(key, 'blocked');
+  }
+  return map;
+}
+
 function hourEnd(hour: string) {
   const h = Number(hour.slice(0, 2));
   return `${String(h + 1).padStart(2, '0')}:00`;
@@ -234,7 +259,7 @@ export default function WeeklyTimetable() {
   const [printOpen, setPrintOpen] = useState(false);
   const [draggingAssignment, setDraggingAssignment] = useState<TimetableAssignment | null>(null);
   const [dragOptions, setDragOptions] = useState<PlacementOptionsResponse | null>(null);
-  const [instantHintMap, setInstantHintMap] = useState<Map<string, 'allowed' | 'blocked' | 'preferred'>>(new Map());
+  const [instantHintMap, setInstantHintMap] = useState<Map<string, 'allowed' | 'warning' | 'blocked' | 'preferred'>>(new Map());
   const [teacherConstraintsMap, setTeacherConstraintsMap] = useState<
     Map<string, Array<{dayOfWeek: string; hour: number; constraintType: string}>>
   >(new Map());
@@ -342,44 +367,9 @@ export default function WeeklyTimetable() {
       : `${dayLabel(a.timeSlot.dayOfWeek)} ${t}`.trim();
   }, [assignmentsById]);
 
-const slotHintMap = useMemo(() => {
-    const map = new Map<string, 'allowed' | 'blocked'>();
-
-    if (!placementOptions) return map;
-
-    for (const option of placementOptions.options) {
-      if (!option.timeSlot?.dayOfWeek || !option.timeSlot?.startTime) continue;
-
-      const key = assignmentKey(option.timeSlot.dayOfWeek, option.timeSlot.startTime);
-
-      if (option.allowed) {
-        if (map.get(key) !== 'allowed') {
-          map.set(key, 'allowed');
-        }
-      } else {
-        if (!map.has(key)) {
-          map.set(key, 'blocked');
-        }
-      }
-    }
-
-    return map;
-  }, [placementOptions]);
-
-const dragSlotHintMap = useMemo(() => {
-  const map = new Map<string, 'allowed' | 'blocked'>();
-  if (!dragOptions) return map;
-  for (const option of dragOptions.options) {
-    if (!option.timeSlot?.dayOfWeek || !option.timeSlot?.startTime) continue;
-    const key = assignmentKey(option.timeSlot.dayOfWeek, option.timeSlot.startTime);
-    if (option.allowed) {
-      if (map.get(key) !== 'allowed') map.set(key, 'allowed');
-    } else {
-      if (!map.has(key)) map.set(key, 'blocked');
-    }
-  }
-  return map;
-}, [dragOptions]);
+// Feature #3: 3-state hints (πράσινο/amber/κόκκινο) από τα server placement options.
+const slotHintMap = useMemo(() => buildSlotHintMap(placementOptions), [placementOptions]);
+const dragSlotHintMap = useMemo(() => buildSlotHintMap(dragOptions), [dragOptions]);
 
 // During drag: use API hints if loaded, else instant frontend hints
 const activeDragMap = dragSlotHintMap.size > 0 ? dragSlotHintMap : instantHintMap;
@@ -508,12 +498,18 @@ function handleDragStart(assignment: TimetableAssignment) {
     }
   }
 
-  const instant = new Map<string, 'allowed' | 'blocked' | 'preferred'>();
+  // Feature #3: το client-side `blocked` set περιέχει advisory συγκρούσεις
+  // (καθηγητής / όλες οι αίθουσες πιασμένες / υποχρεωτικό ίδιου έτους / BLOCKED
+  // διαθεσιμότητα) — ΟΛΕΣ περνούν στο drop με προειδοποίηση, ΔΕΝ είναι δομικά
+  // blocks. Άρα map σε 'warning' (amber), ώστε το instant hint να ταιριάζει με
+  // το τι θα κάνει πράγματι το drop (δομικό block = κόκκινο, το χειρίζεται μόνο
+  // το server hint μιας και ο client δεν ελέγχει δομικούς κανόνες σε SEMESTER).
+  const instant = new Map<string, 'allowed' | 'warning' | 'blocked' | 'preferred'>();
   for (const ts of timeSlots) {
     if (ts.slotType !== 'SEMESTER' || !ts.dayOfWeek || !ts.startTime) continue;
     const key = assignmentKey(ts.dayOfWeek, normalizeTime(ts.startTime));
     if (!instant.has(key)) {
-      if (blocked.has(key))        instant.set(key, 'blocked');
+      if (blocked.has(key))        instant.set(key, 'warning');
       else if (preferred.has(key)) instant.set(key, 'preferred');
       else                         instant.set(key, 'allowed');
     }
@@ -1276,6 +1272,7 @@ async function runSolver() {
     background: (() => {
       const hint = activeHintMap.get(assignmentKey(day.key, hour));
       if (hint === 'blocked')   return '#1c0a0a';
+      if (hint === 'warning')   return '#2a1d05';
       if (hint === 'preferred') return '#14532d';
       if (hint === 'allowed')   return '#052e16';
       return slotAssignments.length === 0 ? '#0b1120' : '#111827';
@@ -1283,6 +1280,7 @@ async function runSolver() {
     borderLeft: (() => {
       const hint = activeHintMap.get(assignmentKey(day.key, hour));
       if (hint === 'blocked')   return '3px solid #7f1d1d';
+      if (hint === 'warning')   return '3px solid #d97706';
       if (hint === 'preferred') return '3px solid #4ade80';
       if (hint === 'allowed')   return '3px solid #22c55e';
       return cellStyle.borderRight;
@@ -1291,7 +1289,8 @@ async function runSolver() {
   }}
   title={(() => {
     const hint = activeHintMap.get(assignmentKey(day.key, hour));
-    if (hint === 'blocked')   return 'Πιθανή σύγκρουση — επιτρέπεται η τοποθέτηση';
+    if (hint === 'blocked')   return 'Δεν επιτρέπεται — δομικός κανόνας (το drop θα μπλοκαριστεί)';
+    if (hint === 'warning')   return 'Πιθανή σύγκρουση — επιτρέπεται η τοποθέτηση με προειδοποίηση';
     if (hint === 'preferred') return '★ Προτιμώμενη ώρα καθηγητή';
     if (hint === 'allowed')   return 'Επιτρεπτή τοποθέτηση';
     return 'Κλικ για προσθήκη μαθήματος';
@@ -1846,6 +1845,14 @@ function PlacementOptionCard({
 
         <div style={{ color: '#22c55e', fontWeight: 900 }}>{option.score}</div>
       </div>
+
+      {option.warning && (
+        <div style={{ margin: '0.35rem 0', padding: '0.4rem 0.6rem', background: '#2a1d05',
+          border: '1px solid #d97706', borderRadius: '6px', color: '#fbbf24',
+          fontSize: '0.76rem', lineHeight: 1.3 }}>
+          ⚠ {option.warning}
+        </div>
+      )}
 
       <ul style={{ margin: '0.5rem 0 0.75rem 1rem', color: '#cbd5e1', fontSize: '0.78rem', lineHeight: 1.35 }}>
         {option.reasons.slice(0, 3).map((reason, index) => (

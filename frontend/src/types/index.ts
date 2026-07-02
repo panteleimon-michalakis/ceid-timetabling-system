@@ -204,8 +204,13 @@ export interface PlacementOption {
   score: number;
   room: Room;
   timeSlot: TimeSlot;
-  status: 'ALLOWED' | 'BLOCKED' | string;
+  status: 'ALLOWED' | 'WARNING' | 'BLOCKED' | string;
   reasons: string[];
+  /**
+   * Feature #3: advisory issue σε δομικά-επιτρεπτό slot (allowed=true αλλά με
+   * scheduling-constraint προειδοποίηση, π.χ. σύγκρουση). null = καθαρή τοποθέτηση.
+   */
+  warning?: string | null;
 }
 
 export interface PlacementOptionsResponse {
