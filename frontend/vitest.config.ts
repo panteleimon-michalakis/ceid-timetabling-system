@@ -8,5 +8,9 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: false,
+    // Μόνο τα unit tests του src τρέχουν με vitest. Τα e2e/*.spec.ts είναι
+    // Playwright (npm run test:e2e) και ΔΕΝ πρέπει να τα σαρώνει το vitest —
+    // αλλιώς το test.describe του Playwright σκάει μέσα στο vitest runner.
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
 });
