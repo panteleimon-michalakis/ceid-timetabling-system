@@ -67,6 +67,7 @@ export default function Teachers() {
   const [loadingSchedule,     setLoadingSchedule]     = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [search,        setSearch]        = useState('');
+  const [toast,         setToast]         = useState('');
 
   // Edit teacher
   const [editing,  setEditing]  = useState(false);
@@ -88,6 +89,13 @@ export default function Teachers() {
     for (const [k, v] of cellMap) { if (savedMap.get(k) !== v) return true; }
     return false;
   }, [cellMap, savedMap]);
+
+  // Auto-clear toast μετά από 3s (ίδιο pattern με Rooms.tsx).
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(''), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // ── Load teachers ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -170,10 +178,20 @@ export default function Teachers() {
 
   async function deleteTeacher() {
     if (!selectedId || !selected) return;
-    if (!confirm(`Διαγραφή καθηγητή "${selected.name}";\nΘα διαγραφούν και όλες οι αναθέσεις.`)) return;
-    await api.delete(`/teachers/${selectedId}`);
-    setTeachers(prev => prev.filter(t => t.id !== selectedId));
-    setSelectedId(null);
+    // Soft-delete semantics: αν ο καθηγητής διδάσκει μαθήματα, απενεργοποιείται
+    // (δεν σβήνεται) και οι αναθέσεις του ΠΑΡΑΜΕΝΟΥΝ στα υπάρχοντα προγράμματα.
+    if (!confirm(`Διαγραφή καθηγητή "${selected.name}";\nΑν διδάσκει μαθήματα, θα απενεργοποιηθεί (soft-delete) και θα παραμείνει στα υπάρχοντα προγράμματα.`)) return;
+    try {
+      const res = await api.delete(`/teachers/${selectedId}`);
+      const deactivated = Boolean((res.data as { deactivated?: boolean } | null)?.deactivated);
+      setTeachers(prev => prev.filter(t => t.id !== selectedId));
+      setSelectedId(null);
+      setToast(deactivated
+        ? 'Ο καθηγητής απενεργοποιήθηκε — παραμένει στα υπάρχοντα προγράμματα.'
+        : 'Ο καθηγητής διαγράφηκε.');
+    } catch {
+      setToast('Σφάλμα διαγραφής καθηγητή.');
+    }
   }
 
   async function addTeacher() {
@@ -284,6 +302,13 @@ export default function Teachers() {
         .cell-btn { transition: background 0.1s, border-color 0.1s; }
         .cell-btn:hover { filter: brightness(1.3); }
       `}</style>
+
+      {toast && (
+        <div style={{ position:'fixed', top:16, right:16, background:'#052e16', border:'1px solid #22c55e',
+          borderRadius:8, padding:'12px 20px', color:'#4ade80', fontSize:13, zIndex:3000 }}>
+          {toast}
+        </div>
+      )}
 
       {/* ══ LEFT: list ══════════════════════════════════════════════════════ */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

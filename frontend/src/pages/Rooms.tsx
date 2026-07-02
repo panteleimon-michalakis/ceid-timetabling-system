@@ -303,8 +303,11 @@ export default function Rooms() {
   async function handleDelete(r: Room) {
     if (!confirm(`Διαγραφή αίθουσας "${r.name}";`)) return;
     try {
-      await roomService.delete(r.id);
-      setToast('Η αίθουσα διαγράφηκε.');
+      const res = await roomService.delete(r.id);
+      const deactivated = Boolean((res.data as { deactivated?: boolean } | null)?.deactivated);
+      setToast(deactivated
+        ? 'Η αίθουσα απενεργοποιήθηκε — παραμένει στα υπάρχοντα προγράμματα.'
+        : 'Η αίθουσα διαγράφηκε.');
       load();
     } catch (err) {
       setToast(getErrorMessage(err,
