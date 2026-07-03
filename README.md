@@ -50,7 +50,7 @@ Runs on http://localhost:5173
 ### Quick start
 ```
 git clone <repo-url>
-cd timetable
+cd ceid-timetabling-system
 cp .env.example .env    # fill in real values, see below
 docker compose up --build
 ```
