@@ -290,3 +290,29 @@ THESIS_NOTES [6c00af3].
 THESIS_NOTES (E-3 entry) ως "εκτός scope"· routed εδώ τώρα ώστε να μην χαθεί. Λύση: ίδιο
 pattern με το E-3 — `{isAdmin && (...)}` γύρω από το κουμπί δημιουργίας. Μόνο καταγραφή,
 ΧΩΡΙΣ fix προς το παρόν. Tier: 🟢 Sonnet.
+
+**[BL-13] Exam publish χωρίς error-check — ✅ RESOLVED (d790339)**
+Από το smoke test: το `Dashboard.tsx:274` έφερνε progress/validation stats ΜΟΝΟ για
+SEMESTER timetables (`t.timetableType === 'SEMESTER'`) και δεν περνούσε καν το `stat`
+prop στην κάρτα EXAM — το `hasErrors` έμενε πάντα `false` για εξεταστικές περιόδους, άρα
+το "δημοσίευση με σφάλματα" confirmation gate δεν ενεργοποιούνταν ΠΟΤΕ, ακόμα και με
+ενεργά hard violations (σιωπηλή δημοσίευση). Επιβεβαιώθηκε πρώτα ότι τα ίδια
+`/timetables/{id}/progress` και `/timetables/{id}/validation` endpoints είναι ήδη
+type-agnostic στο backend (`isExamTimetable(timetable)` branches και στα δύο) και ήδη
+χρησιμοποιούνται σωστά από το `ExamTimetable.tsx` — άρα ασφαλές να διευρυνθεί απλά το
+φίλτρο, χωρίς αλλαγή backend. Fix: το stats fetch καλύπτει πλέον ΟΛΑ τα timetables +
+wiring του `stat` prop στην EXAM κάρτα. Νέο test `Dashboard.test.tsx` (mocked
+`../api/client`) αναπαράγει: EXAM με 3 ενεργά errors → `window.confirm()` καλείται με το
+σωστό μήνυμα· επιβεβαιωμένα RED πριν το fix (timeout στο confirmation title), GREEN μετά.
+Frontend suite 13/13 (was 12/12), `tsc --noEmit` + `eslint` καθαρά, production build OK.
+Tier: 🟢 Sonnet.
+
+**[BL-14] Manual/pinned assignments φαίνεται να εξαιρούνται από solver hard constraints
+(ROOM_CONFLICT) — investigation εκκρεμεί**
+Από το smoke test: χειροκίνητη ανάθεση με γνωστή σύγκρουση αίθουσας παρέμεινε στη ΒΔ μετά
+από solve που ανέφερε hardScore=0, ενώ το ξεχωριστό validation report σωστά την έπιασε.
+Ερώτημα προς διερεύνηση: μήπως ο solver εξαιρεί σκόπιμα ήδη-pinned/existing assignments
+από τα δικά του hard constraint streams (`CeidConstraintProvider`) — αν ναι, expected
+architecture (validation layer = authoritative πηγή αλήθειας) ή κάτι απρόσμενο. ΜΟΝΟ
+ανάγνωση κώδικα, ΚΑΜΙΑ αλλαγή· καμία απόφαση fix πριν ολοκληρωθεί η τεκμηρίωση. Tier:
+🟣/🔵 (ανάλογα με το εύρημα).

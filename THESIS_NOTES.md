@@ -1121,3 +1121,35 @@ Side finding (εκτός scope, καταγράφεται μόνο): το ίδι�
 `TimetableSelector.test.tsx` (2· ορατότητα κουμπιού ανά ρόλο). Full backend suite 224/224 (was
 222/222), frontend 12/12 (was 10/10), `tsc --noEmit` + `eslint` καθαρά και στα δύο αγγιγμένα
 αρχεία.
+
+### [d790339] BL-13 — Exam publish χωρίς error-check: missing stat wiring, ΟΧΙ backend gap
+Εύρημα από smoke test: η δημοσίευση ενός EXAM προγράμματος δεν εμφάνιζε ποτέ το "δημοσίευση
+με σφάλματα" confirmation, ακόμα κι όταν υπήρχαν ενεργά hard validation errors — ενώ το ίδιο
+gate δουλεύει σωστά για SEMESTER. Πρώτο ερώτημα: μήπως τα `/timetables/{id}/progress` και
+`/timetables/{id}/validation` endpoints δεν υποστηρίζουν σωστά EXAM; Ανάγνωση backend
+(`TimetableController.getProgress`/`validateTimetableReport`) έδειξε ρητά `isExamTimetable(...)`
+branches και στα δύο endpoints, ήδη χρησιμοποιούμενα σωστά από το `ExamTimetable.tsx` — άρα το
+backend ήταν ΣΩΣΤΟ, το bug ήταν αμιγώς frontend.
+
+**Ρίζα:** `Dashboard.tsx` (`loadAll`) υπολόγιζε `semIds` φιλτράροντας `t.timetableType ===
+'SEMESTER'` πριν καλέσει τα δύο endpoints ανά timetable id και χτίσει το `stats: Map<id, stat>`.
+Τα EXAM ids ΔΕΝ ήταν καν στη λίστα → κανένα stat γι' αυτά. Επιπλέον, ακόμα κι αν το `stats` map
+είχε entries, το EXAM `<TimetableCard>` δεν περνούσε καν το `stat` prop (μόνο το SEMESTER card το
+περνούσε) — δύο ανεξάρτητα σημεία της ίδιας παράλειψης. Το `hasErrors` στο `TimetableCard` είναι
+`!!(stat && stat.errorCount > 0)`, οπότε με `stat=undefined` έμενε πάντα `false` και το
+`handleAction('publish')` παρέκαμπτε ολοκληρωτικά το `confirm(...)` gate — σιωπηλή δημοσίευση με
+ενεργά errors.
+
+**Fix:** το `loadAll` φέρνει πλέον stats για ΟΛΑ τα timetables (`tts.map(t => t.id)` αντί για
+SEMESTER-only φίλτρο) + το EXAM `<TimetableCard>` παίρνει `stat={stats.get(t.id)}` όπως το
+SEMESTER. Side-effect (επιθυμητό, όχι scope-creep): το top-level "Errors" stat card πλέον
+αθροίζει σωστά errors/warnings και από εξεταστικές, όχι μόνο εξαμηνιαία — ήταν μέρος του ίδιου
+bug (`totalErrors`/`totalWarnings` reduce πάνω στο ίδιο ελλιπές `stats` map).
+
+**TDD:** νέο `Dashboard.test.tsx` mockάρει το `../api/client` module (ίδιο pattern με
+`App.test.tsx`) με ένα EXAM timetable (`errorCount: 3`), render ως ADMIN, περιμένει το κουμπί
+δημοσίευσης να πάρει το `title` που δηλώνει "θα ζητηθεί επιβεβαίωση", το πατάει, και επιβεβαιώνει
+`window.confirm` κλήθηκε με μήνυμα που αναφέρει "3 σφάλματα". Επιβεβαιωμένα RED πριν το fix
+(`findByTitle` timeout — το title αυτό δεν υπήρχε ποτέ για EXAM), GREEN μετά. Frontend suite
+13/13 (was 12/12), `tsc --noEmit` + `eslint` καθαρά, production build OK. Backend ανέπαφο
+(frontend-only αλλαγή).
