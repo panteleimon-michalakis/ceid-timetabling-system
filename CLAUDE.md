@@ -282,3 +282,11 @@ TEACHER_CONFLICT regression). Ο `snapshotTeacherKeys` helper + format-consisten
 έτοιμο hook (γύρισμα = 1 γραμμή μετά το BL-8 fix + clean re-stamp). Tests: `SnapshotFirstHelpersTest`
 (2) + `SnapshotFirstHardValidationTest` (2· studyYear + room immutability)· full suite 204/204. Βλ.
 THESIS_NOTES [6c00af3].
+
+**[BL-12] "+ Νέο Πρόγραμμα" ίδιο missing role-gate με το E-3 (από audit E236)**
+Το backend ήδη περιορίζει `POST /api/timetables` σε ADMIN (SecurityConfig), αλλά το
+`TimetableSelector.tsx` δεν κρύβει το κουμπί "+ Νέο Πρόγραμμα" για TEACHER — ίδιο pattern
+με το "Διαγραφή" button πριν το E-3 fix (`9a1e121`). Καταγράφηκε αρχικά μόνο στο
+THESIS_NOTES (E-3 entry) ως "εκτός scope"· routed εδώ τώρα ώστε να μην χαθεί. Λύση: ίδιο
+pattern με το E-3 — `{isAdmin && (...)}` γύρω από το κουμπί δημιουργίας. Μόνο καταγραφή,
+ΧΩΡΙΣ fix προς το παρόν. Tier: 🟢 Sonnet.

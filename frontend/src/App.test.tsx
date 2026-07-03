@@ -1,6 +1,19 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, cleanup, waitFor } from '@testing-library/react';
 import App from './App';
+
+// Οι σελίδες πίσω από τα protected routes (π.χ. Rooms) κάνουν fetch στο mount·
+// χωρίς mock αυτό είναι πραγματικό network call στο jsdom → unhandled
+// AxiosError (exit code 1 στο `vitest run` ακόμα κι όταν όλα τα assertions περνάνε).
+vi.mock('./api/client', () => ({
+  default: {
+    get: vi.fn(() => Promise.resolve({ data: [] })),
+    post: vi.fn(() => Promise.resolve({ data: {} })),
+    put: vi.fn(() => Promise.resolve({ data: {} })),
+    delete: vi.fn(() => Promise.resolve({ data: {} })),
+    defaults: { headers: { common: {} as Record<string, string> } },
+  },
+}));
 
 // E-2 regression: μια πλήρης (φρέσκια) φόρτωση σε ήδη-authenticated session πάνω
 // σε protected route έχανε το αρχικό path — η async υδάτωση (useEffect) του
