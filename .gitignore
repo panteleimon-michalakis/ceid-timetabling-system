@@ -23,6 +23,7 @@ dist-ssr/
 # Secrets / local config
 .env
 .env.*
+!.env.example
 application-local.properties
 *-local.properties
 
