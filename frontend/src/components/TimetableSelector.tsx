@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { timetableService } from '../api/services';
+import { useAuth } from '../context/AuthContext';
 import type { Timetable } from '../types';
 
 type CreateTimetablePayload = Parameters<typeof timetableService.create>[0];
@@ -35,6 +36,12 @@ export default function TimetableSelector({
   const [excludedInput,   setExcludedInput]   = useState('');
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+
+  // E-3 fix: DELETE /api/timetables/{id} απαιτεί ρόλο ADMIN (SecurityConfig) — το κουμπί
+  // εμφανιζόταν και σε TEACHER, που έπαιρνε πάντα 403. Κρύβεται εντελώς για μη-ADMIN αντί
+  // να αφήνεται ένα μη-λειτουργικό κουμπί.
+  const { user } = useAuth();
+  const isAdmin  = user?.role === 'ADMIN';
 
   function addExcludedDate() {
     const d = excludedInput;
@@ -277,14 +284,16 @@ export default function TimetableSelector({
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={e => { e.stopPropagation(); deleteTimetable(t.id, t.name); }}
-                  disabled={disabled || saving}
-                  title="Διαγραφή προγράμματος"
-                  style={{ border: 'none', background: 'rgba(239,68,68,0.15)', color: '#f87171', borderRadius: '6px', padding: '0.25rem 0.5rem', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0, marginLeft: '8px' }}
-                >
-                  Διαγραφή
-                </button>
+                {isAdmin && (
+                  <button
+                    onClick={e => { e.stopPropagation(); deleteTimetable(t.id, t.name); }}
+                    disabled={disabled || saving}
+                    title="Διαγραφή προγράμματος"
+                    style={{ border: 'none', background: 'rgba(239,68,68,0.15)', color: '#f87171', borderRadius: '6px', padding: '0.25rem 0.5rem', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0, marginLeft: '8px' }}
+                  >
+                    Διαγραφή
+                  </button>
+                )}
               </div>
 
               {isSelected && pct !== null && (
