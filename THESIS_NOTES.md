@@ -1222,3 +1222,14 @@ entities μέσω Timefold `@PlanningPin`) εντοπίστηκε αλλά ΔΕ�
 Καμία αλλαγή κώδικα, κανένα νέο test (όπως ζητήθηκε ρητά). Frontend confirmation στο
 `WeeklyTimetable.tsx:882` επιβεβαιώνει ότι το solve()-scoped hardScore είναι ήδη ορατό στον
 τελικό χρήστη σήμερα.
+
+### [data-only, χωρίς commit] BL-14 follow-up — re-solve id=1 έκλεισε το mismatch στο demo dataset
+
+Στις 2026-07-04: backup → διαγραφή και των 266 (manual+solver-placed) αναθέσεων του
+canonical timetable id=1 → πλήρες clean solve() (300s) → `hardScore=0`, 266/266,
+`GET /validation` επιβεβαίωσε `errorCount=0`. Το BL-14 mismatch (χειροκίνητες αναθέσεις
+αόρατες στο solve()-time score) εξαλείφθηκε ΓΙΑ ΑΥΤΟ ΤΟ dataset επειδή πλέον δεν υπάρχει
+καμία manual/locked ανάθεση — καθαρά data-level λύση, το ίδιο το αρχιτεκτονικό gap
+παραμένει (§BL-14). Κατά τη διόρθωση του delivery `demo_data.sql` βρέθηκε επιπλέον ότι
+`DataSeeder.seedUsers()` κάνει hardcode 4 named teacher accounts στο tracked source
+(§BL-15) — απόφαση: παραμένει ως έχει (institutional emails, μη-λειτουργικοί λογαριασμοί).

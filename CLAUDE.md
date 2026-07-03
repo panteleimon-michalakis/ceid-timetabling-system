@@ -341,3 +341,16 @@ hard errors") — ξαναχτίζει Lesson από ΟΛΕΣ τις saved assig
 στο solve path) ΔΕΝ προτάθηκε ως άμεση ενέργεια — αγγίζει τον solver (HIGH-RISK, §Κανόνες
 #1) και χρειάζεται δική του απόφαση/έγκριση. Πλήρης ανάλυση: THESIS_NOTES.md.
 Tier: 🟣 (αν προχωρήσει fix).
+
+**[BL-15] `DataSeeder.seedUsers()` δημιουργεί login-capable User rows για 4
+συγκεκριμένα ονόματα διδασκόντων (hardcoded στο tracked source)**
+Βρέθηκε κατά τη διόρθωση του delivery `demo_data.sql` (2026-07-04): το
+`DataSeeder.seedUsers()` (`config/DataSeeder.java:106-112`) κάνει upsert 4
+συγκεκριμένους καθηγητές (Τσίχλας/Μεγαλοοικονόμου/Μακρής/Βέργος) με πλήρες
+όνομα + `@ceid.upatras.gr` email σε κάθε fresh εκκίνηση (upsert-by-username,
+τρέχει σε ΚΑΘΕ install όχι μόνο στο delivery). Απόφαση: ΑΦΗΝΕΤΑΙ ως έχει —
+τα emails είναι institutional (όχι προσωπικά), οι λογαριασμοί δεν έχουν
+password (μη-λειτουργικοί χωρίς explicit reset), και είναι εγγενές seeding
+behavior της εφαρμογής, όχι κάτι ειδικό στο delivery zip. Προς επανεξέταση
+ΜΕΤΑ την υπεράσπιση: γιατί μόνο αυτοί οι 4 από τους 66 teachers έχουν User
+λογαριασμό — αν αξίζει διαχωρισμός/γενίκευση. Tier: 🟢/🔵 (αν προχωρήσει).
