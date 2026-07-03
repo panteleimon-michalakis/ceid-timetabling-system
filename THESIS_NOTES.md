@@ -994,7 +994,7 @@ unbounded (>5 λεπτά, CPU-bound, jstack ίδιο stack σε 3 dumps). Ίδι
 το προϋπάρχον 2-arg call site (`validateAssignment`, single-lookup, όχι hot loop) έμεινε ζωντανό
 query χωρίς αλλαγή. `FlushMode` **δεν** χρειάστηκε — το hoisting μόνο του έλυσε πλήρως.
 Verify: API end-to-end ~10s (was >300s/unbounded) σε 2 fresh timetables, ΚΑΙ πραγματικό admin UI
-μέσω claude-in-chrome (2 νέα προγράμματα, κουμπί «Αυτόματη Τοποθέτηση», καμία κρεμάλα)·
+μέσω browser automation testing (2 νέα προγράμματα, κουμπί «Αυτόματη Τοποθέτηση», καμία κρεμάλα)·
 `totalPlaced`/`totalFailed`/`totalSkipped`/`totalCourses` πανομοιότυπα και στα 2 API runs
 (196/70/0/58)· ξεχωριστό `/validation` (errorCount/warningCount 40/29) επιβεβαιώθηκε ίδιο στο
 UI run. Νέο permanent test: `AutoSchedulePerformanceTest` (ρεαλιστικού μεγέθους seed, assert
@@ -1067,7 +1067,7 @@ budget (300s, νέο TEST timetable, ίδιο πλήρες FALL dataset): **hard
 `navigate('/login')`· (3) στο επόμενο render με URL=`/login` ΚΑΙ `isAuthenticated=true` πλέον, η
 ίδια η route `/login` βλέπει `isAuthenticated=true` → δεύτερο `<Navigate to="/dashboard"/>`.
 
-**Επιβεβαίωση (claude-in-chrome, πριν το fix):** login ως admin, ΠΡΑΓΜΑΤΙΚΗ browser navigation
+**Επιβεβαίωση (πραγματικό browser reproduction, πριν το fix):** login ως admin, ΠΡΑΓΜΑΤΙΚΗ browser navigation
 (όχι client-side transition) σε 3 διαφορετικά protected paths (`/rooms`, `/teachers`, `/courses`)
 — **3/3 κατέληξαν σε `/dashboard`**, ταυτόσημο με το reported σύμπτωμα.
 
@@ -1082,7 +1082,7 @@ loading UI να σχεδιαστεί· (β) καμία αλλαγή σε `Privat
 `isAuthenticated`, αλλιώς ξαναφέρνει το ίδιο race από αλλού· με τη lazy-initializer προσέγγιση το
 `isAuthenticated` είναι απλά σωστό από την αρχή, χωρίς κανένα δεύτερο invariant να θυμάται κανείς.
 
-**Verify:** claude-in-chrome μετά το fix — τα ΙΔΙΑ 3 paths (`/rooms`, `/teachers`, `/courses`)
+**Verify:** browser automation testing μετά το fix — τα ΙΔΙΑ 3 paths (`/rooms`, `/teachers`, `/courses`)
 έμειναν στο αρχικό path, καμία bounce. Negative control: `localStorage.clear()` + fresh navigation
 σε `/rooms` → σωστά redirect σε `/login` (το πραγματικό auth gate παραμένει άθικτο, το fix έκλεισε
 μόνο το race, όχι τον έλεγχο). Νέο permanent test: `App.test.tsx` (2 tests) — (1) valid session +
