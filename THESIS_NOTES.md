@@ -1031,11 +1031,63 @@ stream evaluation του solve loop — lock εκεί θα επανέφερε α
 **Verify:** το ίδιο stress test ξανά μετά το fix → **0/0 exceptions** στην ίδια διάρκεια (ήταν
 4/4 πριν). Sanity single-thread (reset→override→reset) ταυτόσημο με πριν. Πραγματικό solve
 end-to-end σε νέο TEST timetable (πλήρες FALL dataset, 30s budget) → 266/266 lessons placed,
-ολοκληρώθηκε κανονικά (hardScore -1 όχι 0 σε αυτό το run — αναμενόμενη στοχαστική διαφορά λόγω
-απουσίας fixed random seed στο SolverConfig, ΟΧΙ σχετιζόμενη με το fix). Η αυστηρή απόδειξη «καμία
-τιμή βάρους δεν άλλαξε σε normal single-solve» είναι το αμετάβλητο ConstraintVerifier suite
-(37+23 tests, exact score deltas ανά κανόνα) — πέρασε 100% απαράλλαχτο, πολύ ισχυρότερη απόδειξη
-από μια στοχαστική full-solve σύγκριση. Νέο permanent test: `SolverWeightsConcurrencyTest` (3
-writer + 5 reader threads, 2s stress, assert μηδέν exceptions· + single-thread sanity). Full
-suite 222/222. Side finding χρήσιμο για E-3: DELETE ως ADMIN σε πρόγραμμα status=SOLVED (όχι
-DRAFT) πέτυχε καθαρά (204) — καμία status-based 403 στην πράξη.
+ολοκληρώθηκε κανονικά με hardScore -1 (όχι 0). Η αυστηρή απόδειξη «καμία τιμή βάρους δεν άλλαξε σε
+normal single-solve» είναι το αμετάβλητο ConstraintVerifier suite (37+23 tests, exact score deltas
+ανά κανόνα) — πέρασε 100% απαράλλαχτο, πολύ ισχυρότερη απόδειξη από μια στοχαστική full-solve
+σύγκριση. Νέο permanent test: `SolverWeightsConcurrencyTest` (3 writer + 5 reader threads, 2s
+stress, assert μηδέν exceptions· + single-thread sanity). Full suite 222/222. Side finding χρήσιμο
+για E-3: DELETE ως ADMIN σε πρόγραμμα status=SOLVED (όχι DRAFT) πέτυχε καθαρά (204) — καμία
+status-based 403 στην πράξη.
+
+**Post-hoc correction — το hardScore=-1 στο 30s run ΔΕΝ ήταν stochastic variance:** αρχική υπόθεση
+(λάθος) ήταν «καμία fixed random seed στο SolverConfig, άρα αναμενόμενη διακύμανση». Ο χρήστης
+ζήτησε ρητά sanity: 2 ΕΠΙΠΛΕΟΝ 30s runs σε νέα TEST timetables → **και τα 2 πάλι hardScore=-1**, το
+ένα μάλιστα με **byte-identical** softScore=-7873 με το πρώτο run (αντίθετο με «τυχαία διαφορά»).
+Bisection στο ΑΚΡΙΒΩΣ προηγούμενο commit (`d642987`, πριν το E-6 fix): 2 ακόμα 30s runs → ΚΑΙ ΤΑ 2
+hardScore=-1 (το ένα byte-identical -7873, το άλλο διαφορετικό -6630) — άρα το -1 στο 30s
+προϋπήρχε του E-6, εντελώς άσχετο με το fix (πλήρως αθωωμένο). Η πραγματική εξήγηση: το
+`?timeLimit=` param του `/solve` endpoint είναι **query param, όχι JSON body** — τα ad-hoc test
+calls έστελναν `{"timeLimitSeconds":30}` ως JSON body, το οποίο αγνοήθηκε σιωπηλά (Spring
+`@RequestParam` δεν διαβάζει JSON body), πέφτοντας στο **default=30s** των ad-hoc tests — πολύ
+μικρότερο από το πραγματικό production budget. Το πραγματικό production call
+(`WeeklyTimetable.tsx:879`) χρησιμοποιεί **300s**. Ένα πραγματικό solve με το σωστό production
+budget (300s, νέο TEST timetable, ίδιο πλήρες FALL dataset): **hardScore=0** (`status:"SOLVED"`),
+266/266, softScore -4874 — matching το documented baseline. Συμπέρασμα: το solver ΔΕΝ είναι
+πλήρως deterministic (η softScore διαφορά -7873/-6630 στο ίδιο pre-E-6 commit το αποδεικνύει —
+πιθανότατα time-based termination + CPU/GC timing jitter, όχι fixed seed), αλλά αυτό είναι άσχετο
+θέμα από το E-6· το 266/266@hard-0 baseline παραμένει έγκυρο στο πραγματικό 300s budget.
+
+### [351bd1e] E-2 — full-reload redirect race: async hydration vs. synchronous route decision
+Θεωρία (πριν οποιαδήποτε αλλαγή): πλήρες page reload σε protected route (π.χ. F5 στο `/rooms`)
+κατέληγε στο `/dashboard`, χάνοντας το αρχικό path. Το `AuthContext` αρχικοποιούσε `user=null` στο
+πρώτο render και διάβαζε το `localStorage` μέσα σε `useEffect` (async ως προς το πρώτο commit).
+Ανάγνωση κώδικα επιβεβαίωσε ακριβώς το μηχανισμό: (1) πρώτο render → `isAuthenticated=false` →
+`PrivateRoute` → `<Navigate to="/login"/>`· (2) το effect του `Navigate` ΚΑΙ το hydration effect
+του `AuthProvider` τρέχουν στο ίδιο πρώτο commit flush, το `setUser(...)` batches μαζί με το
+`navigate('/login')`· (3) στο επόμενο render με URL=`/login` ΚΑΙ `isAuthenticated=true` πλέον, η
+ίδια η route `/login` βλέπει `isAuthenticated=true` → δεύτερο `<Navigate to="/dashboard"/>`.
+
+**Επιβεβαίωση (claude-in-chrome, πριν το fix):** login ως admin, ΠΡΑΓΜΑΤΙΚΗ browser navigation
+(όχι client-side transition) σε 3 διαφορετικά protected paths (`/rooms`, `/teachers`, `/courses`)
+— **3/3 κατέληξαν σε `/dashboard`**, ταυτόσημο με το reported σύμπτωμα.
+
+**Fix — διαφορετικό από την αρχική πρόταση:** η πρόταση ήταν `isInitializing` state + gate σε
+`PrivateRoute`/`AppRoutes` (loading UI όσο δεν έχει ολοκληρωθεί η υδάτωση). Προτιμήθηκε αντ' αυτού
+να κλείσει το race στην πηγή: `useState(loadStoredUser)` — lazy initializer που διαβάζει
+`localStorage` **συγχρονισμένα** μέσα στο πρώτο render, αντί για `useEffect` μετά το commit. Καμία
+ανησυχία SSR (καθαρά client-side SPA, `BrowserRouter`). Λόγοι προτίμησης: (α) καμία νέα κατάσταση/
+loading UI να σχεδιαστεί· (β) καμία αλλαγή σε `PrivateRoute`/`RoleRoute`/`AppRoutes` — το fix μένει
+πλήρως localized στο `AuthContext.tsx`· (γ) πιο ανθεκτικό: με το `isInitializing` gate, ΚΑΘΕ
+μελλοντικός route consumer πρέπει να θυμάται να ελέγξει πρώτα το `isInitializing` πριν διαβάσει
+`isAuthenticated`, αλλιώς ξαναφέρνει το ίδιο race από αλλού· με τη lazy-initializer προσέγγιση το
+`isAuthenticated` είναι απλά σωστό από την αρχή, χωρίς κανένα δεύτερο invariant να θυμάται κανείς.
+
+**Verify:** claude-in-chrome μετά το fix — τα ΙΔΙΑ 3 paths (`/rooms`, `/teachers`, `/courses`)
+έμειναν στο αρχικό path, καμία bounce. Negative control: `localStorage.clear()` + fresh navigation
+σε `/rooms` → σωστά redirect σε `/login` (το πραγματικό auth gate παραμένει άθικτο, το fix έκλεισε
+μόνο το race, όχι τον έλεγχο). Νέο permanent test: `App.test.tsx` (2 tests) — (1) valid session +
+fresh mount σε protected path → παραμένει εκεί, ΟΧΙ `/dashboard`· (2) χωρίς session → redirect σε
+`/login`. Επιβεβαιώθηκε ρητά ότι το test #1 ΑΠΟΤΥΓΧΑΝΕΙ στον pre-fix κώδικα (`git stash` στο
+`AuthContext.tsx`, expected `/rooms` got `/dashboard`) πριν θεωρηθεί έγκυρο regression guard. Full
+frontend suite 10/10 (was 8/8), `tsc --noEmit` + `eslint src` καθαρά. Backend suite ανέπαφο
+(frontend-only αλλαγή) — 222/222 επιβεβαιωμένο ξανά για πληρότητα.
