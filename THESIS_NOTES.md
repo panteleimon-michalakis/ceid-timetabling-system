@@ -1091,3 +1091,33 @@ fresh mount σε protected path → παραμένει εκεί, ΟΧΙ `/dashbo
 `AuthContext.tsx`, expected `/rooms` got `/dashboard`) πριν θεωρηθεί έγκυρο regression guard. Full
 frontend suite 10/10 (was 8/8), `tsc --noEmit` + `eslint src` καθαρά. Backend suite ανέπαφο
 (frontend-only αλλαγή) — 222/222 επιβεβαιωμένο ξανά για πληρότητα.
+
+### [9a1e121] E-3 — DELETE timetable "σιωπηλή αποτυχία": misdiagnosis στη ρίζα, πραγματικό εύρημα αλλού
+Η αρχική θεωρία («403 σε μη-DRAFT πρόγραμμα») ήταν ρητά flagged ως αβέβαιη στην ίδια την
+προδιαγραφή — επιβεβαιώθηκε ΑΠΟΡΡΙΠΤΕΑ, όχι με στατική μόνο ανάγνωση αλλά και live: το
+`TimetableController.delete()` δεν έχει κανέναν έλεγχο status· διαγραφή ενός **PUBLISHED**
+timetable ως ADMIN μέσω πραγματικού API call πέτυχε καθαρά (204), και ένα ακόλουθο GET
+επέστρεψε 404 (πραγματική διαγραφή, όχι soft-fail). Το μόνο πραγματικό 403 στο
+`DELETE /api/timetables/{id}` είναι role-gate στο `SecurityConfig` (μόνο ADMIN) — επιβεβαιώθηκε
+by-design: TEACHER → 403, το target timetable επιβίωσε άθικτο.
+
+**Το πραγματικό εύρημα:** το `TimetableSelector.tsx` δεν είχε ΚΑΜΙΑ αντίληψη ρόλου — το κουμπί
+"Διαγραφή" ρεντάρεται αδιακρίτως και σε TEACHER, που παίρνει πάντα 403. Επιβεβαιώθηκε live
+(login ως TEACHER, το κουμπί εμφανίζεται σε κάθε κάρτα προγράμματος). Το error state ΔΕΝ είναι
+literally σιωπηλό — το `catch { setError(...) }` ρεντάρεται κανονικά — αλλά σε σταθερή θέση στην
+κορυφή του component, αποκομμένο από τη συγκεκριμένη κάρτα που πάτησε ο χρήστης· σε μεγάλη λίστα
+προγραμμάτων αυτό είναι εύκολο να περάσει απαρατήρητο, δίνοντας την εντύπωση "τίποτα δεν έγινε".
+Side finding (εκτός scope, καταγράφεται μόνο): το ίδιο ακριβώς πρόβλημα υπάρχει και στο "+ Νέο
+Πρόγραμμα" — `POST /api/timetables` είναι ΕΠΙΣΗΣ μόνο-ADMIN στο `SecurityConfig`, ίδιο component,
+ίδια απουσία role-gating.
+
+**Fix:** `useAuth()` μέσα στο `TimetableSelector` (`isAdmin = user?.role === 'ADMIN'`), το κουμπί
+"Διαγραφή" κρύβεται εντελώς για μη-ADMIN — ίδια σύσταση με αυτή που είχε προταθεί στην αρχική
+προδιαγραφή για ακριβώς αυτό το σενάριο (κρύψιμο αντί για αλλαγή backend permission model).
+
+**Verify:** browser reproduction και στους δύο ρόλους — ADMIN βλέπει το κουμπί κανονικά, TEACHER
+πλέον καθόλου. Νέα tests: backend `TimetableControllerDeleteMockMvcTest` (2· ADMIN σε PUBLISHED →
+204+πραγματική διαγραφή, TEACHER → 403+καμία μεταβολή) και frontend
+`TimetableSelector.test.tsx` (2· ορατότητα κουμπιού ανά ρόλο). Full backend suite 224/224 (was
+222/222), frontend 12/12 (was 10/10), `tsc --noEmit` + `eslint` καθαρά και στα δύο αγγιγμένα
+αρχεία.
