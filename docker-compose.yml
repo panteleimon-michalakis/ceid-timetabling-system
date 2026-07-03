@@ -22,6 +22,8 @@ services:
       DB_USERNAME: ceid_admin
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+      # Άλλαξέ το σε πραγματικό domain πριν από public deployment (π.χ.
+      # https://timetable.ceid.upatras.gr) — το http://localhost ισχύει μόνο local/LAN.
       CORS_ORIGINS: http://localhost
     ports:
       - "8080:8080"
