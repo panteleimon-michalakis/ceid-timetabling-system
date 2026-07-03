@@ -271,8 +271,11 @@ export default function Dashboard() {
       setTimetables(tts);
       setTeacherCount(Array.isArray(tcRes.data) ? tcRes.data.length : 0);
 
-      const semIds = tts.filter(t => t.timetableType === 'SEMESTER').map(t => t.id);
-      Promise.all(semIds.map(id =>
+      // BL-13: stats (progress+validation) φέρνονται για ΟΛΑ τα προγράμματα,
+      // όχι μόνο SEMESTER — αλλιώς το "δημοσίευση με σφάλματα" confirmation
+      // gate δεν ενεργοποιείται ποτέ για EXAM, ακόμα κι όταν υπάρχουν hard errors.
+      const allIds = tts.map(t => t.id);
+      Promise.all(allIds.map(id =>
         Promise.all([
           api.get(`/timetables/${id}/progress`).catch(() => ({ data: {} })),
           api.get(`/timetables/${id}/validation`).catch(() => ({ data: {} })),
@@ -447,7 +450,7 @@ export default function Dashboard() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 12 }}>
             {examTimetables.map(t => (
               <TimetableCard
-                key={t.id} t={t} to="/exams"
+                key={t.id} t={t} stat={stats.get(t.id)} to="/exams"
                 isAdmin={isAdmin}
                 onPublish={() => handlePublish(t.id)}
                 onUnpublish={() => handleUnpublish(t.id)}
