@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
 import api from '../api/client';
 
@@ -17,8 +17,30 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// E-2 fix: διάβασμα localStorage ΣΥΓΧΡΟΝΑ μέσα στο useState initializer αντί για
+// useEffect — έτσι το isAuthenticated είναι σωστό ΑΠΟ ΤΟ ΠΡΩΤΟ render (καμία SSR
+// ανησυχία, καθαρά client-side SPA). Η προηγούμενη async υδάτωση (effect μετά το
+// πρώτο commit) άφηνε ένα παράθυρο όπου ένα full-reload σε protected route έβλεπε
+// isAuthenticated=false στο πρώτο render → PrivateRoute redirect σε /login →
+// αφού ολοκληρωνόταν η υδάτωση, η ίδια η route /login έβλεπε πλέον
+// isAuthenticated=true → δεύτερο redirect σε /dashboard, χάνοντας το αρχικό path.
+function loadStoredUser(): AuthUser | null {
+  const token    = localStorage.getItem('jwt');
+  const userData = localStorage.getItem('user');
+  if (!token || !userData) return null;
+  try {
+    const parsed = JSON.parse(userData) as AuthUser;
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    return parsed;
+  } catch {
+    localStorage.removeItem('jwt');
+    localStorage.removeItem('user');
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(loadStoredUser);
 
   function logout() {
     localStorage.removeItem('jwt');
@@ -26,19 +48,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     delete api.defaults.headers.common['Authorization'];
     setUser(null);
   }
-
-  useEffect(() => {
-    const token    = localStorage.getItem('jwt');
-    const userData = localStorage.getItem('user');
-    if (token && userData) {
-      try {
-        // Επαναφορά συνεδρίας από localStorage στο mount (συγχρονισμός με εξωτερικό store).
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setUser(JSON.parse(userData));
-        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      } catch { logout(); }
-    }
-  }, []);
 
   async function login(username: string, password: string) {
     const res = await api.post('/auth/login', { username, password });
