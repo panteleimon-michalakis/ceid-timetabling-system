@@ -307,12 +307,37 @@ wiring του `stat` prop στην EXAM κάρτα. Νέο test `Dashboard.test.
 Frontend suite 13/13 (was 12/12), `tsc --noEmit` + `eslint` καθαρά, production build OK.
 Tier: 🟢 Sonnet.
 
-**[BL-14] Manual/pinned assignments φαίνεται να εξαιρούνται από solver hard constraints
-(ROOM_CONFLICT) — investigation εκκρεμεί**
-Από το smoke test: χειροκίνητη ανάθεση με γνωστή σύγκρουση αίθουσας παρέμεινε στη ΒΔ μετά
-από solve που ανέφερε hardScore=0, ενώ το ξεχωριστό validation report σωστά την έπιασε.
-Ερώτημα προς διερεύνηση: μήπως ο solver εξαιρεί σκόπιμα ήδη-pinned/existing assignments
-από τα δικά του hard constraint streams (`CeidConstraintProvider`) — αν ναι, expected
-architecture (validation layer = authoritative πηγή αλήθειας) ή κάτι απρόσμενο. ΜΟΝΟ
-ανάγνωση κώδικα, ΚΑΜΙΑ αλλαγή· καμία απόφαση fix πριν ολοκληρωθεί η τεκμηρίωση. Tier:
-🟣/🔵 (ανάλογα με το εύρημα).
+**[BL-14] Manual assignments αόρατα στο solve()-time hardScore (validation report =
+μοναδική authoritative πηγή) — investigation ΟΛΟΚΛΗΡΩΜΕΝΗ, fix εκκρεμεί (απόφαση)**
+Root cause εντοπίστηκε (`SolverService.buildLessons`, γραμμές 444-459): οι χειροκίνητες/
+locked αναθέσεις (`manuallyAssigned=true` ή `isLocked=true`) χρησιμοποιούνται ΜΟΝΟ για να
+αφαιρεθούν από τον απαιτούμενο αριθμό ωρών ανά μάθημα (ώστε να μην ξαναδημιουργηθούν) —
+ΔΕΝ μπαίνουν ΚΑΘΟΛΟΥ ως `Lesson` planning entities (ούτε pinned) στο πρόβλημα που λύνει ο
+solver. Άρα τα δικά του hard constraint streams (`roomConflict`, `teacherConflict`, ...
+στο `CeidConstraintProvider`) δεν έχουν καμία ορατότητα σε room/slot χειροκίνητων
+αναθέσεων — το solve() score βλέπει ΜΟΝΟ συγκρούσεις ΑΝΑΜΕΣΑ σε νέες solver-placed ώρες,
+ΟΧΙ manual↔manual ή manual↔solver-placed. Ούτε το `buildSolverRooms`/`buildSolverTimeSlots`
+αφαιρούν ήδη-κατειλημμένα από manual assignment room+slot combos από το value range — ο
+solver μπορεί ελεύθερα να τοποθετήσει νέα ώρα ΠΑΝΩ σε χειροκίνητη, χωρίς ποινή. Το
+`hardScore` του solve() εμφανίζεται ΚΑΙ στο UI (`WeeklyTimetable.tsx` message μετά το
+solve: "Hard: {data.hardScore}") — δίνει ψευδή εντύπωση "0 συγκρούσεις" στον χρήστη ΑΚΡΙΒΩΣ
+στο σενάριο του smoke test. ΔΕΝ είναι bug στο `CeidConstraintProvider` (τα constraints
+είναι σωστά πάνω σε ό,τι Lesson set τους δίνεται) — architecture gap στο πώς φτιάχνεται το
+solve()-time πρόβλημα. Το ξεχωριστό validation/analysis path (`analyzeHardViolations` →
+`buildPlacedSolution`, S3/Φ-SV1) ΕΙΝΑΙ ήδη σχεδιασμένο ως η authoritative πλήρης εικόνα
+(ρητά τεκμηριωμένο στο δικό του javadoc ως μελλοντική "μοναδική πηγή solver-εκφράσιμων
+hard errors") — ξαναχτίζει Lesson από ΟΛΕΣ τις saved assignments (manual+solver-placed)
+και τρέχει `SolutionManager.explain` πάνω στο πλήρες ήδη-τοποθετημένο σύνολο, γι' αυτό
+σωστά έπιασε τη σύγκρουση. Άρα functionally το validation report ΕΙΝΑΙ σήμερα η μοναδική
+αξιόπιστη πηγή αλήθειας — αλλά αυτό δεν ήταν ρητή, τεκμηριωμένη απόφαση στο σημείο του
+`buildLessons` (ο σχολιασμός εκεί μιλά μόνο για αποφυγή διπλής δημιουργίας ωρών, όχι για
+συνειδητή εξαίρεση από scoring)· είναι side-effect. Real Timefold `@PlanningPin` ΔΕΝ
+χρησιμοποιείται πουθενά στο codebase (επιβεβαιωμένο, 0 matches) — θα ήταν ο "σωστός" τρόπος
+να μείνουν οι manual αναθέσεις μέσα στο πρόβλημα (άρα ορατές στα constraints) αλλά
+ακίνητες. Ερώτημα (validation-layer-authoritative vs unexpected) απαντήθηκε: είναι
+λειτουργικά η πρώτη περίπτωση σήμερα, αλλά ΟΧΙ επειδή σχεδιάστηκε έτσι εξ αρχής — είναι
+συγκυριακή συνέπεια μιας απόφασης hour-counting. ΚΑΜΙΑ αλλαγή κώδικα έγινε (μόνο
+ανάγνωση/τεκμηρίωση, όπως ζητήθηκε). Πιθανό μελλοντικό fix (`@PlanningPin` integration
+στο solve path) ΔΕΝ προτάθηκε ως άμεση ενέργεια — αγγίζει τον solver (HIGH-RISK, §Κανόνες
+#1) και χρειάζεται δική του απόφαση/έγκριση. Πλήρης ανάλυση: THESIS_NOTES.md.
+Tier: 🟣 (αν προχωρήσει fix).

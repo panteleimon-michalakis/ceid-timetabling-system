@@ -1153,3 +1153,72 @@ bug (`totalErrors`/`totalWarnings` reduce πάνω στο ίδιο ελλιπέ�
 (`findByTitle` timeout — το title αυτό δεν υπήρχε ποτέ για EXAM), GREEN μετά. Frontend suite
 13/13 (was 12/12), `tsc --noEmit` + `eslint` καθαρά, production build OK. Backend ανέπαφο
 (frontend-only αλλαγή).
+
+### [investigation, χωρίς commit] BL-14 — Γιατί το solve() hardScore=0 δεν βλέπει
+συγκρούσεις χειροκίνητων αναθέσεων (ΜΟΝΟ ανάγνωση κώδικα, καμία αλλαγή)
+Εύρημα από smoke test: χειροκίνητη ανάθεση με γνωστή σύγκρουση αίθουσας παρέμεινε στη ΒΔ
+μετά από solve που ανέφερε `hardScore: 0` στο UI (`WeeklyTimetable.tsx`, μήνυμα "Hard: ..."
+μετά το solve), ενώ το ξεχωριστό validation report σωστά την εντόπισε. Ερώτημα: μήπως ο
+solver εξαιρεί σκόπιμα pinned/existing assignments από τα δικά του hard constraint streams
+— αν ναι, expected architecture ή κάτι απρόσμενο;
+
+**Μηχανισμός (επιβεβαιωμένος από κώδικα, όχι υπόθεση):** Δύο εντελώς ξεχωριστά μονοπάτια
+χτίζουν `Lesson` planning entities από διαφορετικές πηγές:
+
+1. **solve() path** (`SolverService.buildLessons`, γρ. 437-516): για κάθε μάθημα υπολογίζει
+   `απαιτούμενες ώρες − ήδη-manual/locked ώρες` (γρ. 486-492) και δημιουργεί `Lesson`
+   entities ΜΟΝΟ για το υπόλοιπο. Σκοπός του σχολιασμού εκεί (γρ. 444-445) είναι ρητά "να μην
+   ξαναδημιουργηθούν lessons για ώρες που έχουν ήδη τοποθετηθεί χειροκίνητα" — καθαρά
+   hour-counting λογική, καμία αναφορά σε constraint visibility. Συνέπεια: οι χειροκίνητες
+   αναθέσεις ΔΕΝ μπαίνουν ΚΑΘΟΛΟΥ στη λίστα `Lesson` που περνάει στο `new CeidTimetable(...)`
+   (`SolverService.java:93`) — ούτε καν ως ακίνητα (pinned) facts. Το `CeidConstraintProvider`
+   (`roomConflict`, `teacherConflict`, κ.ο.κ.) τρέχει `forEachUniquePair(Lesson.class, ...)` —
+   δουλεύει σωστά πάνω σε ό,τι σύνολο Lesson του δοθεί, αλλά αυτό το σύνολο απλά δεν περιέχει
+   τις χειροκίνητες αναθέσεις. Άρα το solve()-time hardScore ελέγχει ΜΟΝΟ συγκρούσεις ανάμεσα
+   σε νέες solver-placed ώρες μεταξύ τους — ΟΧΙ manual↔manual, ΟΧΙ manual↔solver-placed.
+   Επιβεβαιώθηκε επιπλέον ότι `buildSolverRooms`/`buildSolverTimeSlots` δεν αφαιρούν
+   ήδη-κατειλημμένα από manual assignment room+slot combos από το διαθέσιμο value range — ο
+   solver μπορεί ελεύθερα να τοποθετήσει νέα ώρα πάνω σε υπάρχουσα χειροκίνητη ανάθεση χωρίς
+   καμία ποινή, ακριβώς το σενάριο του smoke test.
+   `SolutionPersistenceService.persist` (γρ. 58-64) διαγράφει ΜΟΝΟ τις μη-manual/μη-locked
+   παλιές αναθέσεις πριν γράψει τις νέες solver-placed — οι χειροκίνητες μένουν άθικτες στη ΒΔ
+   σε όλη τη διαδρομή, αλλά ΠΟΤΕ δεν συμμετείχαν στο score που παρήγαγε αυτό το solve().
+
+2. **validation/analysis path** (`SolverService.analyzeHardViolations` →
+   `buildPlacedSolution`, γρ. 132-195· μέρος του S3/Φ-SV1 engine): ξαναχτίζει `Lesson`
+   entities από **ΟΛΕΣ** τις saved `TimetableAssignment` γραμμές του timetable —
+   manual+locked+solver-placed αδιακρίτως — με το ήδη-ανατεθειμένο room/slot τους, και τρέχει
+   `SolutionManager.explain(solution)` με τον ΙΔΙΟ `CeidConstraintProvider` πάνω στο πλήρες,
+   ήδη-τοποθετημένο σύνολο. Επειδή αυτή τη φορά ΚΑΙ οι δύο συγκρουόμενες αναθέσεις υπάρχουν ως
+   Lesson entities ταυτόχρονα, το `roomConflict` constraint τις εντοπίζει σωστά. Το javadoc
+   αυτού του path (γρ. 124-131) το περιγράφει ήδη ρητά ως προορισμένο να γίνει "μελλοντική
+   (Φάση 2) μοναδική πηγή των solver-εκφράσιμων hard errors" — δηλαδή η πρόθεση ότι το
+   validation/analysis layer είναι η authoritative πλήρης εικόνα υπήρχε ήδη τεκμηριωμένη,
+   ανεξάρτητα από το BL-14 εύρημα.
+
+**Απάντηση στο ερώτημα (expected architecture ή απρόσμενο;):** Λειτουργικά, σήμερα, το
+validation report ΕΙΝΑΙ η μόνη αξιόπιστη πηγή αλήθειας για hard conflicts που αγγίζουν
+χειροκίνητες αναθέσεις — και αυτό ευθυγραμμίζεται με την ήδη τεκμηριωμένη πρόθεση του Φ-SV1
+engine. ΩΣΤΟΣΟ δεν ήταν αυτό μια ρητή, συνειδητή σχεδιαστική απόφαση στο σημείο όπου
+δημιουργείται το gap (`buildLessons`) — είναι side-effect μιας απόφασης που αφορούσε
+αποκλειστικά hour-counting, όχι constraint scoring. Επιβεβαιώθηκε επίσης ότι το codebase δεν
+χρησιμοποιεί πουθενά το πραγματικό μηχανισμό pinning του Timefold (`@PlanningPin` — 0 matches
+σε όλο το `solver/` package)· αυτός θα ήταν ο "σωστός" τρόπος να μείνουν οι χειροκίνητες
+αναθέσεις μέσα στο πρόβλημα του solver (άρα ορατές στα constraint streams) αλλά κλειδωμένες
+ώστε ο solver να μην τις μετακινήσει. Χωρίς αυτό, το `hardScore` που εμφανίζεται στο UI αμέσως
+μετά το solve (`WeeklyTimetable.tsx`) μπορεί να δώσει ψευδή εντύπωση πλήρους απουσίας
+συγκρούσεων, ενώ αφορά μόνο το υποσύνολο που χειρίστηκε ο solver.
+
+**Πρακτική σύσταση για ερώτηση καθηγητή:** το validation report (`/timetables/{id}/validation`)
+είναι η authoritative πηγή, ΟΧΙ το raw solve() hardScore — πρέπει πάντα να τρέχει/ελέγχεται
+μετά από κάθε solve, ειδικά όταν υπάρχουν προϋπάρχουσες χειροκίνητες αναθέσεις. Πιθανό
+μελλοντικό fix (ενσωμάτωση χειροκίνητων αναθέσεων στο solve()-time πρόβλημα ως pinned Lesson
+entities μέσω Timefold `@PlanningPin`) εντοπίστηκε αλλά ΔΕΝ υλοποιήθηκε ούτε προτάθηκε ως
+άμεση ενέργεια — αγγίζει τον solver (HIGH-RISK κατά §Κανόνες #1) και χρειάζεται ξεχωριστή
+απόφαση/έγκριση βαρών/αρχιτεκτονικής πριν από οποιαδήποτε υλοποίηση.
+
+**Verify:** αμιγώς ανάγνωση κώδικα (`SolverService.java`, `SolutionPersistenceService.java`,
+`CeidConstraintProvider.java`) + grep επιβεβαίωση απουσίας `@PlanningPin`/pinning μηχανισμού.
+Καμία αλλαγή κώδικα, κανένα νέο test (όπως ζητήθηκε ρητά). Frontend confirmation στο
+`WeeklyTimetable.tsx:882` επιβεβαιώνει ότι το solve()-scoped hardScore είναι ήδη ορατό στον
+τελικό χρήστη σήμερα.
