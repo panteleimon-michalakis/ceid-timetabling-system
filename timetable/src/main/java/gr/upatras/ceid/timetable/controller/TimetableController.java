@@ -1224,6 +1224,13 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
         // integrity layer + completeness + SHARED_EXAM_ROOM. Έτσι: hardScore 0 ⇔ 0 hard errors.
         errors.addAll(validationEngineService.analyzeHardIssues(id));
 
+        // SOFT — ΜΟΝΟ ο teacherPreferredSlot ("πράσινο" κελί): εμφανίζεται ως warning,
+        // ομαδοποιημένο ανά μάθημα. Καθαρά ΕΜΦΑΝΙΣΗ — καμία αλλαγή σε solve/βάρη. Weekly-only:
+        // ο ExamConstraintProvider δεν έχει αυτόν τον constraint (guard για αποφυγή περιττού explain).
+        if (!examTimetable) {
+            warnings.addAll(validationEngineService.analyzeTeacherPreferredWarnings(id));
+        }
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("valid", errors.isEmpty());
         result.put("errorCount", errors.size());

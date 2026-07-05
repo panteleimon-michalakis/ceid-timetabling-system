@@ -272,6 +272,59 @@ public class SolverService {
         return out;
     }
 
+    /**
+     * Constraint name του SOFT teacherPreferredSlot ("πράσινο" κελί καθηγητή), όπως
+     * ορίζεται στον {@link CeidConstraintProvider#teacherPreferredSlot}. Single source για
+     * το φιλτράρισμα — αν αλλάξει εκεί το {@code asConstraint(...)}, άλλαξέ το κι εδώ.
+     */
+    static final String TEACHER_PREFERRED_CONSTRAINT = "Teacher not in preferred slot";
+
+    /**
+     * READ-ONLY ανάλυση των SOFT παραβιάσεων {@code teacherPreferredSlot} ενός αποθηκευμένου
+     * προγράμματος (ΜΟΝΟ για εμφάνιση warnings — καμία αλλαγή σε solve/βάρη). Παράλληλο του
+     * {@link #analyzeHardViolations}: ίδιο μονοπάτι (loadConstraintsFromDb + buildPlacedSolution
+     * + {@code explain}) αλλά κρατά ΜΟΝΟ αυτόν τον έναν soft constraint. Για exam προγράμματα
+     * ο {@link ExamConstraintProvider} δεν έχει αυτόν τον constraint → επιστρέφει κενή λίστα.
+     */
+    public List<SoftViolation> analyzeTeacherPreferredViolations(Long timetableId) {
+        Timetable tt = timetableRepo.findById(timetableId).orElseThrow();
+        loadConstraintsFromDb();                 // ΙΔΙΟ με analyzeHardViolations: registries + weights
+        List<TimetableAssignment> assignments = assignmentRepo.findByTimetableId(timetableId);
+        CeidTimetable solution = buildPlacedSolution(tt, assignments);
+
+        SolutionManager<CeidTimetable, HardSoftScore> sm =
+                SolutionManager.create(solverFactoryFor(tt, null));
+        ScoreExplanation<CeidTimetable, HardSoftScore> explanation = sm.explain(solution);
+        return extractTeacherPreferredViolations(explanation);
+    }
+
+    /**
+     * PURE (unit-testable χωρίς DB/solver wiring): κρατά ΜΟΝΟ τα ConstraintMatch του
+     * {@link #TEACHER_PREFERRED_CONSTRAINT} και μαπάρει τα indicted Lessons σε assignment ids.
+     * Παράλληλο του {@link #extractHardViolations} (ΔΕΝ το αγγίζει). Το φιλτράρισμα γίνεται
+     * ΑΠΟΚΛΕΙΣΤΙΚΑ με το constraint name, άρα κανένας άλλος soft constraint (preferNormalHours,
+     * room capacity, spread, ...) δεν διαρρέει στο αποτέλεσμα.
+     */
+    static List<SoftViolation> extractTeacherPreferredViolations(
+            ScoreExplanation<CeidTimetable, HardSoftScore> explanation) {
+        List<SoftViolation> out = new ArrayList<>();
+        for (ConstraintMatchTotal<HardSoftScore> cmt :
+                explanation.getConstraintMatchTotalMap().values()) {
+            if (!TEACHER_PREFERRED_CONSTRAINT.equals(cmt.getConstraintRef().constraintName())) {
+                continue;                                            // ΜΟΝΟ ο teacherPreferredSlot
+            }
+            for (ConstraintMatch<HardSoftScore> cm : cmt.getConstraintMatchSet()) {
+                List<Long> ids = cm.getIndictedObjectList().stream()
+                        .filter(o -> o instanceof Lesson)
+                        .map(o -> ((Lesson) o).getId())
+                        .distinct().toList();
+                out.add(new SoftViolation(cmt.getConstraintRef().constraintName(),
+                                          ids, cm.getScore().softScore()));
+            }
+        }
+        return out;
+    }
+
 private List<SolverTimeSlot> buildSolverTimeSlots(Timetable timetable) {
     List<SolverTimeSlot> result = new ArrayList<>();
 

@@ -8,6 +8,7 @@ import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
 import gr.upatras.ceid.timetable.repository.TimetableAssignmentRepository;
 import gr.upatras.ceid.timetable.solver.ConstraintCodeMapping;
 import gr.upatras.ceid.timetable.solver.HardViolation;
+import gr.upatras.ceid.timetable.solver.SoftViolation;
 import gr.upatras.ceid.timetable.solver.SolverService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -90,6 +92,70 @@ public class ValidationEngineService {
             issue.put("type", "ERROR");
         }
         return issues;
+    }
+
+    /**
+     * Παράγει WARNING issues για τον SOFT περιορισμό {@code teacherPreferredSlot} ("πράσινο"
+     * κελί καθηγητή): ΟΜΑΔΟΠΟΙΗΜΕΝΑ ΑΝΑ ΜΑΘΗΜΑ (με τα ονόματα διδασκόντων), μία γραμμή/μάθημα
+     * με το πλήθος ωρών εκτός preferred. Shape ίδιο με τα υπόλοιπα warnings του report
+     * (severity/code/message/referenceId). READ-ONLY — ΜΟΝΟ εμφάνιση, καμία αλλαγή σε solve/βάρη.
+     *
+     * Σημ.: για co-taught μάθημα εμφανίζονται όλοι οι ενεργοί διδάσκοντες (η attribution στον
+     * συγκεκριμένο διδάσκοντα με τα preferred δεν προκύπτει από το match· για warning αρκεί).
+     */
+    public List<Map<String, Object>> analyzeTeacherPreferredWarnings(Long timetableId) {
+        List<SoftViolation> violations = solverService.analyzeTeacherPreferredViolations(timetableId);
+        if (violations.isEmpty()) return List.of();
+
+        // assignmentId -> courseId + courseId -> displayName (snapshot-first, ίδιο με toView)
+        Map<Long, Long> courseIdByAssignment = new HashMap<>();
+        Map<Long, String> courseNameById = new HashMap<>();
+        for (TimetableAssignment a : assignmentRepo.findByTimetableId(timetableId)) {
+            if (a.getCourse() == null) continue;
+            courseIdByAssignment.put(a.getId(), a.getCourse().getId());
+            courseNameById.putIfAbsent(a.getCourse().getId(),
+                    a.getSnapshotCourseName() != null ? a.getSnapshotCourseName() : a.getCourse().getName());
+        }
+
+        // courseId -> ονόματα ΕΝΕΡΓΩΝ διδασκόντων (ίδιο active-φίλτρο/πηγή με το analyzeHardIssues·
+        // σκόπιμη μικρο-διπλασίαση ώστε να ΜΗΝ αγγιχτεί το hard path).
+        Map<Long, List<String>> teacherNamesByCourse = new HashMap<>();
+        for (CourseTeacher ct : courseTeacherRepo.findAllWithTeacherAndCourse()) {
+            if (ct.getCourse() == null || ct.getTeacher() == null) continue;
+            if (!Boolean.TRUE.equals(ct.getTeacher().getActive())) continue;
+            String name = ct.getTeacher().getName();
+            if (name == null || name.isBlank()) continue;
+            teacherNamesByCourse
+                    .computeIfAbsent(ct.getCourse().getId(), k -> new ArrayList<>())
+                    .add(name);
+        }
+
+        // Ομαδοποίηση: courseId -> πλήθος ωρών εκτός preferred (LinkedHashMap = ντετερμινιστική σειρά)
+        Map<Long, Integer> hoursByCourse = new LinkedHashMap<>();
+        for (SoftViolation v : violations) {
+            for (Long assignmentId : v.assignmentIds()) {
+                Long courseId = courseIdByAssignment.get(assignmentId);
+                if (courseId != null) hoursByCourse.merge(courseId, 1, Integer::sum);
+            }
+        }
+
+        List<Map<String, Object>> warnings = new ArrayList<>();
+        for (Map.Entry<Long, Integer> e : hoursByCourse.entrySet()) {
+            Long courseId = e.getKey();
+            int hours = e.getValue();
+            String courseName = courseNameById.getOrDefault(courseId, "(άγνωστο μάθημα)");
+            List<String> teachers = teacherNamesByCourse.getOrDefault(courseId, List.of());
+            String who = teachers.isEmpty() ? "" : " (διδ. " + String.join(", ", teachers) + ")";
+
+            Map<String, Object> w = new LinkedHashMap<>();
+            w.put("severity", "WARNING");
+            w.put("code", "TEACHER_PREFERRED");
+            w.put("message", "Το μάθημα " + courseName + who + " έχει " + hours
+                    + (hours == 1 ? " ώρα" : " ώρες") + " εκτός των preferred ωρών του διδάσκοντα.");
+            w.put("referenceId", courseId);
+            warnings.add(w);
+        }
+        return warnings;
     }
 
     /**
