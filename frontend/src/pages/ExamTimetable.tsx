@@ -9,6 +9,7 @@ import type {
 import TimetableSelector from '../components/TimetableSelector';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 import ValidationIssuesModal from '../components/ValidationIssuesModal';
+import { matchesExamPreference } from './examPreferenceMatch';
 import { esc, shortCode, yearColor, todayGreek, buildPrintDocument, openAndPrint, groupItems, parseTeachers, electiveBucket } from '../utils/printTimetable';
 import { getErrorMessage } from '../utils/errors';
 import type { PrintGroupBy } from '../utils/printTimetable';
@@ -91,13 +92,15 @@ function StatCard({ label, value, color, onClick }: { label: string; value: numb
 }
 
 function ExamCard({
-  assignment, onShowDetails, onDragStart, onDragEnd, disabled,
+  assignment, onShowDetails, onDragStart, onDragEnd, disabled, preferred = false,
 }: {
   assignment: TimetableAssignment;
   onShowDetails: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
   disabled: boolean;
+  /** TASK 3: true αν η εξέταση είναι στην προτιμώμενη αίθουσα/ώρα του μαθήματος. */
+  preferred?: boolean;
 }) {
   const color = YEAR_COLORS[(assignment.course?.studyYear ?? 1) - 1] ?? '#3b82f6';
   const shortCode = (assignment.course?.code ?? '').replace(/^CEID_/, '');
@@ -120,6 +123,10 @@ function ExamCard({
       {assignment.course?.visibleInTimetable === false && (
         <span title="Σε συνεννόηση — δεν εμφανίζεται στο δημόσιο πρόγραμμα"
               style={{ fontSize: '10px' }}>🤝</span>
+      )}
+      {preferred && (
+        <span title="Τοποθετημένο στην προτιμώμενη αίθουσα/ώρα εξέτασης του διδάσκοντα"
+              style={{ color: '#22c55e', fontSize: '10px', lineHeight: 1 }}>★</span>
       )}
     </div>
   );
@@ -367,6 +374,14 @@ export default function ExamTimetable() {
     });
     return set;
   }, [examDates]);
+
+  // TASK 3: courseId -> full Course (τα preferredExamRooms/Hours ΔΕΝ έρχονται στο
+  // assignment-embedded course DTO — τα αντλούμε από τη φορτωμένη λίστα courses).
+  const courseById = useMemo(() => {
+    const m = new Map<number, Course>();
+    for (const c of courses) m.set(c.id, c);
+    return m;
+  }, [courses]);
 
   const eligibleCourses = useMemo(() =>
     getEligibleCourses(courses, selectedTimetable), [courses, selectedTimetable]);
@@ -970,16 +985,23 @@ export default function ExamTimetable() {
                                   <span style={{ color: '#1e3a5f', fontSize: '11px' }}>+ Προσθήκη</span>
                                 ) : (
                                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', alignItems: 'flex-start' }}>
-                                    {cellAssignments.map(a => (
-                                      <ExamCard
-                                        key={a.id}
-                                        assignment={a}
-                                        onShowDetails={() => setDetailsAssignment(a)}
-                                        onDragStart={() => setDraggingAssignment(a)}
-                                        onDragEnd={() => setDraggingAssignment(null)}
-                                        disabled={saving}
-                                      />
-                                    ))}
+                                    {cellAssignments.map(a => {
+                                      const fc = courseById.get(a.course?.id ?? -1);
+                                      const preferred = matchesExamPreference(
+                                        fc?.preferredExamRooms, fc?.preferredExamHours,
+                                        a.room?.code, a.timeSlot?.startTime);
+                                      return (
+                                        <ExamCard
+                                          key={a.id}
+                                          assignment={a}
+                                          preferred={preferred}
+                                          onShowDetails={() => setDetailsAssignment(a)}
+                                          onDragStart={() => setDraggingAssignment(a)}
+                                          onDragEnd={() => setDraggingAssignment(null)}
+                                          disabled={saving}
+                                        />
+                                      );
+                                    })}
                                   </div>
                                 )}
                               </td>
