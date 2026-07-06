@@ -158,12 +158,21 @@ public final class HardViolationTranslator {
     /** " (Δευτέρα 9:00)" αν υπάρχουν day/hour· ασφαλές παράλειψη αν λείπουν. */
     private static String timeSuffix(AssignmentView v) {
         if (v == null) return "";
-        String day = v.dayOfWeekName() != null
-                ? GREEK_DAYS.getOrDefault(v.dayOfWeekName(), v.dayOfWeekName()) : null;
-        Integer h = v.startHour();
-        if (day != null && h != null) return " (" + day + " " + h + ":00)";
-        if (day != null) return " (" + day + ")";
-        if (h != null) return " (" + h + ":00)";
+        String label = dayHourLabel(v.dayOfWeekName(), v.startHour());
+        return label.isEmpty() ? "" : " (" + label + ")";
+    }
+
+    /**
+     * "Δευτέρα 9:00" από day-enum-name + ακέραιη ώρα· null-safe (μόνο ό,τι υπάρχει, κενό αν
+     * λείπουν και τα δύο). ΙΔΙΑ λογική/χάρτης ({@code GREEK_DAYS}) με το {@link #timeSuffix} —
+     * public ώστε να επαναχρησιμοποιείται από τα preferred warnings (ValidationEngineService):
+     * single source of truth για την ελληνική ετικέτα μέρας/ώρας.
+     */
+    public static String dayHourLabel(String dayEnumName, Integer hour) {
+        String day = dayEnumName != null ? GREEK_DAYS.getOrDefault(dayEnumName, dayEnumName) : null;
+        if (day != null && hour != null) return day + " " + hour + ":00";
+        if (day != null) return day;
+        if (hour != null) return hour + ":00";
         return "";
     }
 

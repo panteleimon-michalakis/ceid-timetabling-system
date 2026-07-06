@@ -194,7 +194,12 @@ public class ValidationEngineService {
         }
 
         // Ομαδοποίηση: courseId -> [roomDeviates, hourDeviates] (LinkedHashMap = ντετερμινιστική σειρά)
-        Map<Long, boolean[]> devByCourse = new LinkedHashMap<>();
+        // Μία εγγραφή ανά μάθημα, από την (πρώτη) αποκλίνουσα εξέταση — στην πράξη κάθε μάθημα
+        // έχει ακριβώς μία εξέταση. Κρατά ΚΑΙ την τρέχουσα τοποθέτηση (μέρα/ώρα/αίθουσα) ώστε
+        // το μήνυμα να απαριθμεί τις προτιμώμενες τιμές ΚΑΙ πού μπήκε πραγματικά.
+        record ExamDev(boolean roomDev, boolean hourDev, List<String> prefRooms, List<Integer> prefHours,
+                       String dayName, Integer hour, String actualRoom) {}
+        Map<Long, ExamDev> devByCourse = new LinkedHashMap<>();
         for (TimetableAssignment a : assignments) {
             if (a.getAssignmentType() != TimetableAssignment.AssignmentType.EXAM) continue;
             Course c = a.getCourse();
@@ -209,35 +214,65 @@ public class ValidationEngineService {
             Integer startHour = a.getSnapshotStartTime() != null ? a.getSnapshotStartTime().getHour()
                     : (a.getTimeSlot() != null && a.getTimeSlot().getStartTime() != null
                             ? a.getTimeSlot().getStartTime().getHour() : null);
+            String dayName = a.getSnapshotDayOfWeek() != null ? a.getSnapshotDayOfWeek()
+                    : (a.getTimeSlot() != null && a.getTimeSlot().getDayOfWeek() != null
+                            ? a.getTimeSlot().getDayOfWeek().name() : null);
 
             boolean roomDev = !prefRooms.isEmpty() && roomCode != null && !prefRooms.contains(roomCode);
             boolean hourDev = !prefHours.isEmpty() && startHour != null && !prefHours.contains(startHour);
             if (!roomDev && !hourDev) continue;
 
-            boolean[] agg = devByCourse.computeIfAbsent(c.getId(), k -> new boolean[2]);
-            agg[0] |= roomDev;
-            agg[1] |= hourDev;
+            // Απαρίθμηση από το ΙΔΙΟ parsed CSV set, ταξινομημένη ντετερμινιστικά (αίθουσες
+            // αλφαβητικά, ώρες αύξουσα) — καμία διαφορετική ανάγνωση του raw string.
+            List<String> roomsSorted = prefRooms.stream().sorted().toList();
+            List<Integer> hoursSorted = prefHours.stream().sorted().toList();
+            devByCourse.putIfAbsent(c.getId(),
+                    new ExamDev(roomDev, hourDev, roomsSorted, hoursSorted, dayName, startHour, roomCode));
         }
 
         List<Map<String, Object>> warnings = new ArrayList<>();
-        for (Map.Entry<Long, boolean[]> e : devByCourse.entrySet()) {
+        for (Map.Entry<Long, ExamDev> e : devByCourse.entrySet()) {
             Long courseId = e.getKey();
-            boolean roomDev = e.getValue()[0];
-            boolean hourDev = e.getValue()[1];
+            ExamDev d = e.getValue();
             String courseName = courseNameById.getOrDefault(courseId, "(άγνωστο μάθημα)");
             List<String> teachers = teacherNamesByCourse.getOrDefault(courseId, List.of());
             String who = teachers.isEmpty() ? "" : " (διδ. " + String.join(", ", teachers) + ")";
-            String what = roomDev && hourDev ? "αίθουσα και ώρα" : roomDev ? "αίθουσα" : "ώρα";
+
+            // Προτιμώμενες τιμές ανά διάσταση που αποκλίνει.
+            StringBuilder pref = new StringBuilder();
+            if (d.roomDev()) {
+                pref.append("στην αίθουσα ").append(joinPreferred(d.prefRooms()));
+            }
+            if (d.hourDev()) {
+                if (pref.length() > 0) pref.append(" και ");
+                List<String> hourLabels = d.prefHours().stream().map(h -> h + ":00").toList();
+                pref.append("στις ώρες ").append(joinPreferred(hourLabels));
+            }
+
+            // Τρέχουσα τοποθέτηση: ίδιο μοτίβο με το timeSuffix (ελληνική μέρα + ώρα).
+            String placement = HardViolationTranslator.dayHourLabel(d.dayName(), d.hour());
+            String tail = placement.isEmpty() ? "τοποθετήθηκε εκτός αυτών" : "τοποθετήθηκε " + placement;
+            if (d.roomDev() && d.actualRoom() != null) {
+                tail += " στην αίθουσα " + d.actualRoom();
+            }
 
             Map<String, Object> w = new LinkedHashMap<>();
             w.put("severity", "WARNING");
             w.put("code", "EXAM_PREFERRED");
             w.put("message", "Η εξέταση του μαθήματος " + courseName + who
-                    + " τοποθετήθηκε σε " + what + " εκτός των προτιμώμενων της εξέτασης.");
+                    + " προτιμάται " + pref + " — " + tail + ".");
             w.put("referenceId", courseId);
             warnings.add(w);
         }
         return warnings;
+    }
+
+    /** "Γ, Β ή ΑΦΕ" — ένωση λίστας με «, » και « ή » πριν το τελευταίο. Κενή → "". */
+    private static String joinPreferred(List<String> items) {
+        if (items == null || items.isEmpty()) return "";
+        if (items.size() == 1) return items.get(0);
+        return String.join(", ", items.subList(0, items.size() - 1))
+                + " ή " + items.get(items.size() - 1);
     }
 
     /**

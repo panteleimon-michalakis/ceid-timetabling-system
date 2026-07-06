@@ -302,7 +302,10 @@ class ValidationReportFlipTest {
         List<Map<String, Object>> ep = byCode(warningsOf(report(tt)), "EXAM_PREFERRED");
         assertEquals(1, ep.size(), "1 EXAM_PREFERRED για απόκλιση αίθουσας");
         assertEquals(c.getId(), refId(ep.get(0)));
-        assertTrue(msg(ep.get(0)).contains("αίθουσα"), "μήνυμα αναφέρει αίθουσα: " + msg(ep.get(0)));
+        String m = msg(ep.get(0));
+        assertTrue(m.contains("TFLIP_OTHER"), "μήνυμα απαριθμεί την προτιμώμενη αίθουσα: " + m);
+        assertTrue(m.contains("Δευτέρα 9:00"), "μήνυμα αναφέρει μέρα/ώρα τοποθέτησης: " + m);
+        assertTrue(m.contains("TFLIP_EPR"), "μήνυμα αναφέρει την πραγματική αίθουσα: " + m);
     }
 
     @Test
@@ -318,7 +321,31 @@ class ValidationReportFlipTest {
         List<Map<String, Object>> ep = byCode(warningsOf(report(tt)), "EXAM_PREFERRED");
         assertEquals(1, ep.size(), "1 EXAM_PREFERRED για απόκλιση ώρας");
         assertEquals(c.getId(), refId(ep.get(0)));
-        assertTrue(msg(ep.get(0)).contains("ώρα"), "μήνυμα αναφέρει ώρα: " + msg(ep.get(0)));
+        String m = msg(ep.get(0));
+        assertTrue(m.contains("12:00"), "μήνυμα απαριθμεί την προτιμώμενη ώρα: " + m);
+        assertTrue(m.contains("Δευτέρα 9:00"), "μήνυμα αναφέρει μέρα/ώρα τοποθέτησης: " + m);
+    }
+
+    @Test
+    void examPreferredBothDeviate_enumeratesAllValues() {
+        // Πολλαπλές προτιμώμενες τιμές + απόκλιση ΚΑΙ σε αίθουσα ΚΑΙ σε ώρα → το μήνυμα
+        // απαριθμεί όλες τις τιμές με «, » και « ή » πριν την τελευταία.
+        Timetable tt = seedTt(Timetable.TimetableType.EXAM, Timetable.SemesterType.FALL);
+        Room actual = seedRoom("EPB", Room.RoomType.CLASSROOM);   // code TFLIP_EPB
+        Course c = seedCourse("EPBC", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
+        linkTeacher(c, seedTeacher("Δοκιμή ΕξΔ", "BT11"));
+        c.setPreferredExamRooms("TFLIP_A, TFLIP_B, TFLIP_C");   // 3 προτιμώμενες, καμία = actual
+        c.setPreferredExamHours("12, 15");                       // προτιμώμενες ώρες, actual=9
+        courseRepo.save(c);
+        seedAssign(tt, c, actual, seedSlot(DayOfWeek.TUESDAY, 9), AssignmentType.EXAM);
+
+        List<Map<String, Object>> ep = byCode(warningsOf(report(tt)), "EXAM_PREFERRED");
+        assertEquals(1, ep.size());
+        String m = msg(ep.get(0));
+        assertTrue(m.contains("TFLIP_A, TFLIP_B ή TFLIP_C"), "απαρίθμηση αιθουσών με ή: " + m);
+        assertTrue(m.contains("12:00 ή 15:00"), "απαρίθμηση ωρών με ή: " + m);
+        assertTrue(m.contains("Τρίτη 9:00"), "μέρα/ώρα τοποθέτησης: " + m);
+        assertTrue(m.contains("TFLIP_EPB"), "πραγματική αίθουσα: " + m);
     }
 
     @Test
