@@ -568,8 +568,9 @@ static SolverRoom toSolverRoom(Room room) {
         return lessons;
     }
 
-/** A6: "Β, Δ1" -> {"Β","Δ1"} */
-private static java.util.Set<String> parseCsvCodes(String csv) {
+/** A6: "Β, Δ1" -> {"Β","Δ1"}. public: single source of truth για το CSV parsing —
+ *  reuse από το ValidationEngineService.analyzeExamPreferredWarnings (καμία λογική αλλαγή). */
+public static java.util.Set<String> parseCsvCodes(String csv) {
     if (csv == null || csv.isBlank()) return java.util.Set.of();
     java.util.Set<String> out = new java.util.HashSet<>();
     for (String part : csv.split("[,;]")) {
@@ -579,8 +580,8 @@ private static java.util.Set<String> parseCsvCodes(String csv) {
     return out;
 }
 
-/** A6: "9, 12" -> {9, 12} — αγνοεί μη αριθμητικές τιμές. */
-private static java.util.Set<Integer> parseCsvHours(String csv) {
+/** A6: "9, 12" -> {9, 12} — αγνοεί μη αριθμητικές τιμές. public: βλ. parseCsvCodes. */
+public static java.util.Set<Integer> parseCsvHours(String csv) {
     if (csv == null || csv.isBlank()) return java.util.Set.of();
     java.util.Set<Integer> out = new java.util.HashSet<>();
     for (String part : csv.split("[,;]")) {

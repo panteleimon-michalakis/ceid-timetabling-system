@@ -1164,18 +1164,10 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
                         && a.getRoom().getId().equals(b.getRoom().getId())
                         && a.getTimeSlot().getId().equals(b.getTimeSlot().getId())) {
 
-                    if (examTimetable) {
-                        // Κανόνας τμήματος: το μοίρασμα αίθουσας στην εξεταστική
-                        // επιτρέπεται — ενημερωτική προειδοποίηση, όχι σφάλμα (integrity/advisory).
-                        warnings.add(validationIssue(
-                                "WARNING",
-                                "SHARED_EXAM_ROOM",
-                                "Η αίθουσα " + a.getRoom().getCode()
-                                        + " μοιράζεται την ίδια ώρα από: "
-                                        + a.getCourse().getName() + " και " + b.getCourse().getName() + ".",
-                                a.getId()
-                        ));
-                    }
+                    // SHARED_EXAM_ROOM warning ΑΦΑΙΡΕΘΗΚΕ (warnings redesign): το μοίρασμα
+                    // αίθουσας στην εξεταστική επιτρέπεται από τον κανόνα τμήματος — δεν
+                    // εμφανίζεται πλέον ως advisory warning. Τα exam warnings κρατούν ΜΟΝΟ την
+                    // απόκλιση preferred αίθουσας/ώρας (analyzeExamPreferredWarnings).
                     // ROOM_CONFLICT (μη-εξεταστική): παράγεται πλέον από τον engine (Φ-SV2b-ii-β2).
                 }
 
@@ -1193,22 +1185,11 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
         // 3. Έλεγχος πληρότητας προγράμματος (#5: από ΠΑΓΩΜΕΝΟ scope, όχι live findAll)
         List<TimetableScopedCourse> relevantCourses = scopedCoursesFor(timetable);
 
-        if (examTimetable) {
-            Set<Long> coursesWithExam = assignments.stream()
-                    .filter(assignment -> assignment.getCourse() != null)
-                    .filter(assignment -> assignment.getAssignmentType() == TimetableAssignment.AssignmentType.EXAM)
-                    .map(assignment -> assignment.getCourse().getId())
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toSet());
-
-            for (TimetableScopedCourse course : relevantCourses) {
-                if (course.getCourseId() == null || !coursesWithExam.contains(course.getCourseId())) {
-                    warnings.add(validationIssue("WARNING", "MISSING_EXAM",
-                            "Το μάθημα " + course.getSnapshotCourseName() + " δεν έχει τοποθετημένη εξέταση.",
-                            course.getCourseId()));
-                }
-            }
-        } else {
+        // MISSING_EXAM warning ΑΦΑΙΡΕΘΗΚΕ (warnings redesign): η εξεταστική δεν εμφανίζει
+        // πλέον completeness warning ανά μη-τοποθετημένη εξέταση. Weekly completeness κρατά
+        // ΜΟΝΟ τα integrity errors (UNNECESSARY_HOURS/TOO_MANY_HOURS)· το MISSING_HOURS warning
+        // αφαιρέθηκε επίσης (checkCourseHours). Έτσι weekly warnings = teacherPreferred μόνο.
+        if (!examTimetable) {
             for (TimetableScopedCourse course : relevantCourses) {
                 checkCourseHours(assignments, course.getCourseId(), course.getSnapshotCourseName(),
                         TimetableAssignment.AssignmentType.LECTURE, course.getReqLectureHours(), warnings, errors);
@@ -1229,6 +1210,10 @@ private boolean sameCalendarDay(TimeSlot existingSlot, TimeSlot candidateSlot) {
         // ο ExamConstraintProvider δεν έχει αυτόν τον constraint (guard για αποφυγή περιττού explain).
         if (!examTimetable) {
             warnings.addAll(validationEngineService.analyzeTeacherPreferredWarnings(id));
+        } else {
+            // EXAM warnings = ΜΟΝΟ απόκλιση preferred αίθουσας/ώρας εξέτασης (redesign):
+            // συμπληρωματικό του ★ στο grid, ομαδοποιημένο ανά μάθημα. READ-ONLY.
+            warnings.addAll(validationEngineService.analyzeExamPreferredWarnings(id));
         }
 
         Map<String, Object> result = new LinkedHashMap<>();

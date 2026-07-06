@@ -159,6 +159,88 @@ public class ValidationEngineService {
     }
 
     /**
+     * Παράγει WARNING issues για την ΑΠΟΚΛΙΣΗ τοποθετημένης εξέτασης από τις δηλωμένες
+     * προτιμήσεις αίθουσας/ώρας του μαθήματος ({@code preferredExamRooms/Hours}). Παράλληλο
+     * μοτίβο με το {@link #analyzeTeacherPreferredWarnings}: ΟΜΑΔΟΠΟΙΗΣΗ ΑΝΑ ΜΑΘΗΜΑ, μία
+     * γραμμή/μάθημα. ΣΥΜΠΛΗΡΩΜΑΤΙΚΟ του ★ (frontend examPreferenceMatch): το ★ εμφανίζεται iff
+     * πλήρης τήρηση· το warning iff δηλωμένη προτίμηση ΚΑΙ απόκλιση σε αίθουσα ή/και ώρα.
+     * Ίδιο CSV parsing με τον solver ({@link SolverService#parseCsvCodes}/{@code parseCsvHours},
+     * single source of truth) + ίδια match λογική με τον {@code ExamConstraintProvider}
+     * (room: {@code !preferredRoomCodes.contains(code)}, hour: {@code !preferredStartHours.contains(h)}).
+     * SNAPSHOT-FIRST στα room/hour (ίδιο με {@link #toView}) → σταθερό σε παγωμένα προγράμματα.
+     * READ-ONLY — ΜΟΝΟ εμφάνιση, καμία αλλαγή σε solve/βάρη.
+     */
+    public List<Map<String, Object>> analyzeExamPreferredWarnings(Long timetableId) {
+        List<TimetableAssignment> assignments = assignmentRepo.findByTimetableId(timetableId);
+
+        // courseId -> displayName (snapshot-first)
+        Map<Long, String> courseNameById = new HashMap<>();
+        for (TimetableAssignment a : assignments) {
+            if (a.getCourse() == null) continue;
+            courseNameById.putIfAbsent(a.getCourse().getId(),
+                    a.getSnapshotCourseName() != null ? a.getSnapshotCourseName() : a.getCourse().getName());
+        }
+
+        // courseId -> ονόματα ΕΝΕΡΓΩΝ διδασκόντων (ίδια πηγή/φίλτρο με τα υπόλοιπα paths)
+        Map<Long, List<String>> teacherNamesByCourse = new HashMap<>();
+        for (CourseTeacher ct : courseTeacherRepo.findAllWithTeacherAndCourse()) {
+            if (ct.getCourse() == null || ct.getTeacher() == null) continue;
+            if (!Boolean.TRUE.equals(ct.getTeacher().getActive())) continue;
+            String name = ct.getTeacher().getName();
+            if (name == null || name.isBlank()) continue;
+            teacherNamesByCourse
+                    .computeIfAbsent(ct.getCourse().getId(), k -> new ArrayList<>())
+                    .add(name);
+        }
+
+        // Ομαδοποίηση: courseId -> [roomDeviates, hourDeviates] (LinkedHashMap = ντετερμινιστική σειρά)
+        Map<Long, boolean[]> devByCourse = new LinkedHashMap<>();
+        for (TimetableAssignment a : assignments) {
+            if (a.getAssignmentType() != TimetableAssignment.AssignmentType.EXAM) continue;
+            Course c = a.getCourse();
+            if (c == null) continue;
+
+            java.util.Set<String> prefRooms = SolverService.parseCsvCodes(c.getPreferredExamRooms());
+            java.util.Set<Integer> prefHours = SolverService.parseCsvHours(c.getPreferredExamHours());
+            if (prefRooms.isEmpty() && prefHours.isEmpty()) continue; // καμία δηλωμένη προτίμηση
+
+            String roomCode = a.getSnapshotRoomCode() != null ? a.getSnapshotRoomCode()
+                    : (a.getRoom() != null ? a.getRoom().getCode() : null);
+            Integer startHour = a.getSnapshotStartTime() != null ? a.getSnapshotStartTime().getHour()
+                    : (a.getTimeSlot() != null && a.getTimeSlot().getStartTime() != null
+                            ? a.getTimeSlot().getStartTime().getHour() : null);
+
+            boolean roomDev = !prefRooms.isEmpty() && roomCode != null && !prefRooms.contains(roomCode);
+            boolean hourDev = !prefHours.isEmpty() && startHour != null && !prefHours.contains(startHour);
+            if (!roomDev && !hourDev) continue;
+
+            boolean[] agg = devByCourse.computeIfAbsent(c.getId(), k -> new boolean[2]);
+            agg[0] |= roomDev;
+            agg[1] |= hourDev;
+        }
+
+        List<Map<String, Object>> warnings = new ArrayList<>();
+        for (Map.Entry<Long, boolean[]> e : devByCourse.entrySet()) {
+            Long courseId = e.getKey();
+            boolean roomDev = e.getValue()[0];
+            boolean hourDev = e.getValue()[1];
+            String courseName = courseNameById.getOrDefault(courseId, "(άγνωστο μάθημα)");
+            List<String> teachers = teacherNamesByCourse.getOrDefault(courseId, List.of());
+            String who = teachers.isEmpty() ? "" : " (διδ. " + String.join(", ", teachers) + ")";
+            String what = roomDev && hourDev ? "αίθουσα και ώρα" : roomDev ? "αίθουσα" : "ώρα";
+
+            Map<String, Object> w = new LinkedHashMap<>();
+            w.put("severity", "WARNING");
+            w.put("code", "EXAM_PREFERRED");
+            w.put("message", "Η εξέταση του μαθήματος " + courseName + who
+                    + " τοποθετήθηκε σε " + what + " εκτός των προτιμώμενων της εξέτασης.");
+            w.put("referenceId", courseId);
+            warnings.add(w);
+        }
+        return warnings;
+    }
+
+    /**
      * Adapter TimetableAssignment -> AssignmentView. BL-11: SNAPSHOT-FIRST (snapshot
      * non-null κερδίζει, αλλιώς live fallback) στα name/studyYear/room/day/hour ώστε τα
      * μηνύματα των hard issues παγωμένων προγραμμάτων να μένουν αμετάβλητα σε μελλοντικά

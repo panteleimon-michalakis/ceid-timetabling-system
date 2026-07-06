@@ -257,19 +257,22 @@ class ValidationReportFlipTest {
     }
 
     @Test
-    void missingExam_stillReported() {
+    void missingExam_noLongerWarned() {
+        // Warnings redesign: το MISSING_EXAM ΑΦΑΙΡΕΘΗΚΕ — μη-τοποθετημένη εξέταση δεν
+        // παράγει πλέον warning. Τα exam warnings κρατούν μόνο EXAM_PREFERRED.
         Timetable tt = seedTt(Timetable.TimetableType.EXAM, Timetable.SemesterType.FALL);
         Course c = seedCourse("ME", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
         linkTeacher(c, seedTeacher("Δοκιμή Εξετ", "BT5"));
         seedScope(tt, c, 0, 0, 0, true);   // αναμένεται εξέταση, καμία δεν τοποθετήθηκε
 
-        List<Map<String, Object>> me = byCode(warningsOf(report(tt)), "MISSING_EXAM");
-        assertEquals(1, me.size());
-        assertEquals(c.getId(), refId(me.get(0)));
+        assertTrue(byCode(warningsOf(report(tt)), "MISSING_EXAM").isEmpty(),
+                "MISSING_EXAM δεν παράγεται πλέον");
     }
 
     @Test
-    void sharedExamRoom_stillWarned() {
+    void sharedExamRoom_noLongerWarned() {
+        // Warnings redesign: το SHARED_EXAM_ROOM advisory ΑΦΑΙΡΕΘΗΚΕ — το επιτρεπτό μοίρασμα
+        // αίθουσας στην εξεταστική δεν εμφανίζεται πλέον ως warning.
         Timetable tt = seedTt(Timetable.TimetableType.EXAM, Timetable.SemesterType.FALL);
         Room r = seedRoom("B6", Room.RoomType.CLASSROOM);
         TimeSlot s = seedSlot(DayOfWeek.MONDAY, 9);
@@ -280,8 +283,71 @@ class ValidationReportFlipTest {
         seedAssign(tt, c1, r, s, AssignmentType.EXAM);
         seedAssign(tt, c2, r, s, AssignmentType.EXAM);
 
-        List<Map<String, Object>> se = byCode(warningsOf(report(tt)), "SHARED_EXAM_ROOM");
-        assertEquals(1, se.size(), "SHARED_EXAM_ROOM (advisory) ακόμη πυροδοτείται");
+        assertTrue(byCode(warningsOf(report(tt)), "SHARED_EXAM_ROOM").isEmpty(),
+                "SHARED_EXAM_ROOM δεν παράγεται πλέον");
+    }
+
+    // ---------- NEW: EXAM_PREFERRED (απόκλιση preferred αίθουσας/ώρας εξέτασης) ----------
+
+    @Test
+    void examPreferredRoomDeviation_warned() {
+        Timetable tt = seedTt(Timetable.TimetableType.EXAM, Timetable.SemesterType.FALL);
+        Room actual = seedRoom("EPR", Room.RoomType.CLASSROOM);       // code TFLIP_EPR
+        Course c = seedCourse("EPRC", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
+        linkTeacher(c, seedTeacher("Δοκιμή ΕξΠρ", "BT7"));
+        c.setPreferredExamRooms("TFLIP_OTHER");   // προτίμηση ΑΛΛΗ αίθουσα → απόκλιση
+        courseRepo.save(c);
+        seedAssign(tt, c, actual, seedSlot(DayOfWeek.MONDAY, 9), AssignmentType.EXAM);
+
+        List<Map<String, Object>> ep = byCode(warningsOf(report(tt)), "EXAM_PREFERRED");
+        assertEquals(1, ep.size(), "1 EXAM_PREFERRED για απόκλιση αίθουσας");
+        assertEquals(c.getId(), refId(ep.get(0)));
+        assertTrue(msg(ep.get(0)).contains("αίθουσα"), "μήνυμα αναφέρει αίθουσα: " + msg(ep.get(0)));
+    }
+
+    @Test
+    void examPreferredHourDeviation_warned() {
+        Timetable tt = seedTt(Timetable.TimetableType.EXAM, Timetable.SemesterType.FALL);
+        Room r = seedRoom("EPH", Room.RoomType.CLASSROOM);
+        Course c = seedCourse("EPHC", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
+        linkTeacher(c, seedTeacher("Δοκιμή ΕξΩρ", "BT8"));
+        c.setPreferredExamHours("12");    // προτίμηση 12:00, τοποθετείται 9:00 → απόκλιση
+        courseRepo.save(c);
+        seedAssign(tt, c, r, seedSlot(DayOfWeek.MONDAY, 9), AssignmentType.EXAM);
+
+        List<Map<String, Object>> ep = byCode(warningsOf(report(tt)), "EXAM_PREFERRED");
+        assertEquals(1, ep.size(), "1 EXAM_PREFERRED για απόκλιση ώρας");
+        assertEquals(c.getId(), refId(ep.get(0)));
+        assertTrue(msg(ep.get(0)).contains("ώρα"), "μήνυμα αναφέρει ώρα: " + msg(ep.get(0)));
+    }
+
+    @Test
+    void examPreferredMatch_noWarning() {
+        // τοποθέτηση ΕΝΤΟΣ preferred (αίθουσα ΚΑΙ ώρα) → κανένα warning (★ θα εμφανιζόταν)
+        Timetable tt = seedTt(Timetable.TimetableType.EXAM, Timetable.SemesterType.FALL);
+        Room r = seedRoom("EPM", Room.RoomType.CLASSROOM);           // code TFLIP_EPM
+        Course c = seedCourse("EPMC", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
+        linkTeacher(c, seedTeacher("Δοκιμή ΕξΟκ", "BT9"));
+        c.setPreferredExamRooms("TFLIP_EPM");
+        c.setPreferredExamHours("9");
+        courseRepo.save(c);
+        seedAssign(tt, c, r, seedSlot(DayOfWeek.MONDAY, 9), AssignmentType.EXAM);
+
+        assertTrue(byCode(warningsOf(report(tt)), "EXAM_PREFERRED").isEmpty(),
+                "εντός preferred → κανένα EXAM_PREFERRED warning");
+    }
+
+    @Test
+    void examNoPreference_noWarning() {
+        // καμία δηλωμένη προτίμηση → κανένα warning (ούτε ★)
+        Timetable tt = seedTt(Timetable.TimetableType.EXAM, Timetable.SemesterType.FALL);
+        Room r = seedRoom("ENP", Room.RoomType.CLASSROOM);
+        Course c = seedCourse("ENPC", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
+        linkTeacher(c, seedTeacher("Δοκιμή ΕξΚ", "BT10"));
+        seedAssign(tt, c, r, seedSlot(DayOfWeek.MONDAY, 9), AssignmentType.EXAM);
+
+        assertTrue(byCode(warningsOf(report(tt)), "EXAM_PREFERRED").isEmpty(),
+                "καμία προτίμηση → κανένα EXAM_PREFERRED warning");
     }
 
     // ====================================================================
