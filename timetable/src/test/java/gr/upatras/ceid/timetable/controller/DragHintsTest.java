@@ -3,6 +3,7 @@ package gr.upatras.ceid.timetable.controller;
 import gr.upatras.ceid.timetable.entity.Course;
 import gr.upatras.ceid.timetable.entity.CourseTeacher;
 import gr.upatras.ceid.timetable.entity.Room;
+import gr.upatras.ceid.timetable.entity.RoomConstraint;
 import gr.upatras.ceid.timetable.entity.Teacher;
 import gr.upatras.ceid.timetable.entity.TeacherConstraint;
 import gr.upatras.ceid.timetable.entity.TimeSlot;
@@ -12,6 +13,7 @@ import gr.upatras.ceid.timetable.entity.TimetableAssignment.AssignmentType;
 import gr.upatras.ceid.timetable.repository.CourseRepository;
 import gr.upatras.ceid.timetable.repository.CourseTeacherRepository;
 import gr.upatras.ceid.timetable.repository.RoomRepository;
+import gr.upatras.ceid.timetable.repository.RoomConstraintRepository;
 import gr.upatras.ceid.timetable.repository.TeacherConstraintRepository;
 import gr.upatras.ceid.timetable.repository.TeacherRepository;
 import gr.upatras.ceid.timetable.repository.TimeSlotRepository;
@@ -65,10 +67,12 @@ class DragHintsTest {
     @Autowired TeacherRepository teacherRepo;
     @Autowired CourseTeacherRepository courseTeacherRepo;
     @Autowired TeacherConstraintRepository teacherConstraintRepo;
+    @Autowired RoomConstraintRepository roomConstraintRepo;
 
     private final List<TimetableAssignment> savedAssignments = new ArrayList<>();
     private final List<CourseTeacher> savedCourseTeachers = new ArrayList<>();
     private final List<TeacherConstraint> savedTeacherConstraints = new ArrayList<>();
+    private final List<RoomConstraint> savedRoomConstraints = new ArrayList<>();
     private final List<Course> savedCourses = new ArrayList<>();
     private final List<Room> savedRooms = new ArrayList<>();
     private final List<TimeSlot> savedTimeSlots = new ArrayList<>();
@@ -179,6 +183,38 @@ class DragHintsTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void roomBlocked_flaggedRed_otherSlotsClean() {
+        // TASK 2.4 — ROOM-blocked hard constraint. Το drag-hint είναι per-(day,hour) με
+        // min-over-rooms, οπότε ένα κελί κοκκινίζει από room-block ΜΟΝΟ όταν ΚΑΜΙΑ αίθουσα
+        // δεν είναι καθαρή εκεί. Deterministic σενάριο: μπλοκάρω ΟΛΕΣ τις διαθέσιμες semester
+        // αίθουσες σε ένα slot (WEDNESDAY 9) → κανένα clean room → κόκκινο· άλλα slots καθαρά.
+        Timetable tt = seedTt();
+        Course c = seedCourse("RBK", 2);
+        linkTeacher(c, seedTeacher("Δοκιμή Αιθ", "RBK1"));
+        TimetableAssignment a = seedAssign(tt, c, seedRoom("RBK"), seedSlot(DayOfWeek.MONDAY, 9));
+
+        for (Room r : roomRepo.findByAvailableForSemesterTrueAndActiveTrue()) {
+            blockRoom(r, DayOfWeek.WEDNESDAY, 9);
+        }
+
+        ResponseEntity<?> resp = controller.dragHints(tt.getId(), a.getId());
+        assertEquals(200, resp.getStatusCode().value());
+        Map<String, Object> body = (Map<String, Object>) resp.getBody();
+        List<Map<String, Object>> hints = (List<Map<String, Object>>) body.get("hints");
+
+        // Το slot WEDNESDAY 9 (όλες οι αίθουσες μπλοκαρισμένες) → κόκκινο.
+        assertTrue(hints.stream().anyMatch(h ->
+                        "WEDNESDAY".equals(h.get("day"))
+                        && ((Number) h.get("hour")).intValue() == 9
+                        && Boolean.TRUE.equals(h.get("hardViolation"))),
+                "slot με ΟΛΕΣ τις αίθουσες room-blocked → κόκκινο");
+        // Καθαρά slots υπάρχουν (δεν κοκκίνισαν όλα από το room-block μιας ώρας).
+        assertTrue(hints.stream().anyMatch(h -> Boolean.FALSE.equals(h.get("hardViolation"))),
+                "μη-μπλοκαρισμένα slots παραμένουν καθαρά");
+    }
+
+    @Test
     void preferredSlotsByCourse_authoritativeM2M() {
         // TASK 2.3: το πράσινο αντλείται από CourseTeacher M2M ∩ PREFERRED_SLOTS, ΟΧΙ teachersText.
         Course c = seedCourse("PREF", 2);
@@ -198,6 +234,12 @@ class DragHintsTest {
         savedTeacherConstraints.add(teacherConstraintRepo.save(TeacherConstraint.builder()
                 .teacher(t).dayOfWeek(day.name()).hour(hour)
                 .constraintType(TeacherConstraint.ConstraintType.PREFERRED).build()));
+    }
+
+    private void blockRoom(Room r, DayOfWeek day, int hour) {
+        savedRoomConstraints.add(roomConstraintRepo.save(RoomConstraint.builder()
+                .room(r).dayOfWeek(day.name()).hour(hour)
+                .constraintType(RoomConstraint.ConstraintType.BLOCKED).build()));
     }
 
     private Timetable seedExamTt(LocalDate start, LocalDate end) {
@@ -321,6 +363,7 @@ class DragHintsTest {
         if (!savedTimetables.isEmpty()) timetableRepo.deleteAll(savedTimetables);
         if (!savedCourseTeachers.isEmpty()) courseTeacherRepo.deleteAll(savedCourseTeachers);
         if (!savedTeacherConstraints.isEmpty()) teacherConstraintRepo.deleteAll(savedTeacherConstraints);
+        if (!savedRoomConstraints.isEmpty()) roomConstraintRepo.deleteAll(savedRoomConstraints);
         if (!savedCourses.isEmpty()) courseRepo.deleteAll(savedCourses);
         if (!savedRooms.isEmpty()) roomRepo.deleteAll(savedRooms);
         if (!savedTimeSlots.isEmpty()) timeSlotRepo.deleteAll(savedTimeSlots);
