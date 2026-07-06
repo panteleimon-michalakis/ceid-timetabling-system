@@ -299,6 +299,30 @@ public class SolverService {
     }
 
     /**
+     * READ-ONLY snapshot (αμετάβλητο αντίγραφο) του τρέχοντος {@code PREFERRED_SLOTS} registry:
+     * merged hardcoded {@code TeacherAvailabilityRegistry} + DB {@code teacher_constraints} (με DB
+     * override — βλ. {@link #loadConstraintsFromDb}). Για την ΕΜΦΑΝΙΣΗ των preferred κελιών στα
+     * warnings· καλείται ΑΜΕΣΩΣ μετά το {@link #analyzeTeacherPreferredViolations} (ίδιο load pass)
+     * ώστε το snapshot να αντιστοιχεί σε ό,τι είδε ο έλεγχος. teacherKey -> set of "DAY_HOUR".
+     */
+    public Map<String, Set<String>> preferredSlotsSnapshot() {
+        Map<String, Set<String>> src = TeacherAvailabilityConstraints.PREFERRED_SLOTS;
+        Map<String, Set<String>> out = new HashMap<>();
+        if (src != null) {
+            for (Map.Entry<String, Set<String>> e : src.entrySet()) {
+                out.put(e.getKey(), new HashSet<>(e.getValue()));
+            }
+        }
+        return out;
+    }
+
+    /** Το {@code teacherKey} ενός ονόματος (ΙΔΙΟΣ κανόνας με τον solver) — public wrapper για την
+     *  name↔key αντιστοίχιση στο display path (ValidationEngineService). Read-only, καμία λογική. */
+    public String teacherKeyOf(String name) {
+        return teacherKey(name);
+    }
+
+    /**
      * PURE (unit-testable χωρίς DB/solver wiring): κρατά ΜΟΝΟ τα ConstraintMatch του
      * {@link #TEACHER_PREFERRED_CONSTRAINT} και μαπάρει τα indicted Lessons σε assignment ids.
      * Παράλληλο του {@link #extractHardViolations} (ΔΕΝ το αγγίζει). Το φιλτράρισμα γίνεται

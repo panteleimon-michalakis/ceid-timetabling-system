@@ -107,14 +107,26 @@ public class ValidationEngineService {
         List<SoftViolation> violations = solverService.analyzeTeacherPreferredViolations(timetableId);
         if (violations.isEmpty()) return List.of();
 
-        // assignmentId -> courseId + courseId -> displayName (snapshot-first, ίδιο με toView)
+        // Snapshot των preferred κελιών (merged registry+DB) ΑΜΕΣΩΣ μετά τον ίδιο load pass του
+        // analyzeTeacherPreferredViolations → αντιστοιχεί σε ό,τι είδε ο έλεγχος. teacherKey -> slots.
+        Map<String, java.util.Set<String>> preferredByKey = solverService.preferredSlotsSnapshot();
+
+        // assignmentId -> courseId + placement "DAY_HOUR" (snapshot-first) + courseId -> displayName
         Map<Long, Long> courseIdByAssignment = new HashMap<>();
+        Map<Long, String> placementByAssignment = new HashMap<>();
         Map<Long, String> courseNameById = new HashMap<>();
         for (TimetableAssignment a : assignmentRepo.findByTimetableId(timetableId)) {
             if (a.getCourse() == null) continue;
             courseIdByAssignment.put(a.getId(), a.getCourse().getId());
             courseNameById.putIfAbsent(a.getCourse().getId(),
                     a.getSnapshotCourseName() != null ? a.getSnapshotCourseName() : a.getCourse().getName());
+            String dayName = a.getSnapshotDayOfWeek() != null ? a.getSnapshotDayOfWeek()
+                    : (a.getTimeSlot() != null && a.getTimeSlot().getDayOfWeek() != null
+                            ? a.getTimeSlot().getDayOfWeek().name() : null);
+            Integer hour = a.getSnapshotStartTime() != null ? a.getSnapshotStartTime().getHour()
+                    : (a.getTimeSlot() != null && a.getTimeSlot().getStartTime() != null
+                            ? a.getTimeSlot().getStartTime().getHour() : null);
+            if (dayName != null && hour != null) placementByAssignment.put(a.getId(), dayName + "_" + hour);
         }
 
         // courseId -> ονόματα ΕΝΕΡΓΩΝ διδασκόντων (ίδιο active-φίλτρο/πηγή με το analyzeHardIssues·
@@ -130,32 +142,112 @@ public class ValidationEngineService {
                     .add(name);
         }
 
-        // Ομαδοποίηση: courseId -> πλήθος ωρών εκτός preferred (LinkedHashMap = ντετερμινιστική σειρά)
-        Map<Long, Integer> hoursByCourse = new LinkedHashMap<>();
+        // Ομαδοποίηση ΑΝΑ ΜΑΘΗΜΑ: οι εκτός-preferred τοποθετήσεις του (LinkedHashSet = ντετερμινιστικά)
+        Map<Long, java.util.LinkedHashSet<String>> placementsByCourse = new LinkedHashMap<>();
         for (SoftViolation v : violations) {
             for (Long assignmentId : v.assignmentIds()) {
                 Long courseId = courseIdByAssignment.get(assignmentId);
-                if (courseId != null) hoursByCourse.merge(courseId, 1, Integer::sum);
+                if (courseId == null) continue;
+                placementsByCourse.computeIfAbsent(courseId, k -> new java.util.LinkedHashSet<>());
+                String placement = placementByAssignment.get(assignmentId);
+                if (placement != null) placementsByCourse.get(courseId).add(placement);
             }
         }
 
         List<Map<String, Object>> warnings = new ArrayList<>();
-        for (Map.Entry<Long, Integer> e : hoursByCourse.entrySet()) {
+        for (Map.Entry<Long, java.util.LinkedHashSet<String>> e : placementsByCourse.entrySet()) {
             Long courseId = e.getKey();
-            int hours = e.getValue();
+            java.util.Set<String> placements = e.getValue();
             String courseName = courseNameById.getOrDefault(courseId, "(άγνωστο μάθημα)");
             List<String> teachers = teacherNamesByCourse.getOrDefault(courseId, List.of());
-            String who = teachers.isEmpty() ? "" : " (διδ. " + String.join(", ", teachers) + ")";
+
+            // Preferred κελιά ανά διδάσκοντα, ομαδοποιημένα ανά μέρα. Co-taught: διδάσκοντες με
+            // ΤΑΥΤΟΣΗΜΗ ομαδοποίηση ενοποιούνται σε μία φράση (ονόματα μαζί)· διαφορετικές
+            // προτιμήσεις → ξεχωριστές φράσεις. Απόφαση σχεδίασης (βλ. commit/thesis).
+            LinkedHashMap<String, List<String>> namesByGrouping = new LinkedHashMap<>();
+            for (String name : teachers) {
+                java.util.Set<String> prefs = preferredByKey.get(solverService.teacherKeyOf(name));
+                if (prefs == null || prefs.isEmpty()) continue;
+                String grouped = groupSlotsByDay(prefs);
+                if (grouped.isEmpty()) continue;
+                namesByGrouping.computeIfAbsent(grouped, k -> new ArrayList<>()).add(name);
+            }
+
+            String placementText = groupSlotsByDay(placements);
+            String placementClause = placementText.isEmpty()
+                    ? "τοποθετήθηκε εκτός των προτιμώμενων ωρών"
+                    : "τοποθετήθηκε " + placementText;
+
+            String message;
+            if (namesByGrouping.isEmpty()) {
+                // Fallback (δεν αναμένεται: η παραβίαση προϋποθέτει διδάσκοντα με preferred κελιά).
+                String who = teachers.isEmpty() ? "" : " (διδ. " + String.join(", ", teachers) + ")";
+                message = "Το μάθημα " + courseName + who + " " + placementClause
+                        + " εκτός των προτιμώμενων ωρών του διδάσκοντα.";
+            } else {
+                List<String> teacherClauses = new ArrayList<>();
+                for (Map.Entry<String, List<String>> te : namesByGrouping.entrySet()) {
+                    boolean many = te.getValue().size() > 1;
+                    String names = String.join(", ", te.getValue());
+                    teacherClauses.add((many ? "οι διδάσκοντες " : "ο διδάσκων ") + names
+                            + (many ? " προτιμούν " : " προτιμάει ") + te.getKey());
+                }
+                String teacherPart = String.join("· ", teacherClauses);
+                teacherPart = Character.toUpperCase(teacherPart.charAt(0)) + teacherPart.substring(1);
+                message = teacherPart + " — το μάθημα " + courseName + " " + placementClause + ".";
+            }
 
             Map<String, Object> w = new LinkedHashMap<>();
             w.put("severity", "WARNING");
             w.put("code", "TEACHER_PREFERRED");
-            w.put("message", "Το μάθημα " + courseName + who + " έχει " + hours
-                    + (hours == 1 ? " ώρα" : " ώρες") + " εκτός των preferred ωρών του διδάσκοντα.");
+            w.put("message", message);
             w.put("referenceId", courseId);
             warnings.add(w);
         }
         return warnings;
+    }
+
+    /** Ημέρες με σειρά Δευτέρα→Κυριακή για ντετερμινιστική ομαδοποίηση slots. */
+    private static final List<String> DAY_ORDER = List.of(
+            "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY");
+
+    /**
+     * Ομαδοποιεί ένα σύνολο "DAY_HOUR" slots ανά μέρα (σειρά Δευτέρα→Κυριακή, ώρες αύξουσα) σε
+     * αναγνώσιμη ελληνική φράση, π.χ. {"MONDAY_14","MONDAY_15","TUESDAY_9"} →
+     * "Δευτέρα 14:00, 15:00 και Τρίτη 9:00". Ελληνική ετικέτα μέρας από
+     * {@link HardViolationTranslator#dayHourLabel} (single source of truth). Κενό → "".
+     */
+    private static String groupSlotsByDay(java.util.Collection<String> slots) {
+        Map<String, java.util.TreeSet<Integer>> hoursByDay = new HashMap<>();
+        for (String s : slots) {
+            int idx = s.lastIndexOf('_');
+            if (idx <= 0 || idx == s.length() - 1) continue;
+            String day = s.substring(0, idx);
+            try {
+                hoursByDay.computeIfAbsent(day, k -> new java.util.TreeSet<>())
+                        .add(Integer.parseInt(s.substring(idx + 1)));
+            } catch (NumberFormatException ignored) { }
+        }
+        List<String> dayClauses = new ArrayList<>();
+        for (String day : DAY_ORDER) {
+            java.util.TreeSet<Integer> hrs = hoursByDay.get(day);
+            if (hrs == null || hrs.isEmpty()) continue;
+            StringBuilder hoursStr = new StringBuilder();
+            for (Integer h : hrs) {
+                if (hoursStr.length() > 0) hoursStr.append(", ");
+                hoursStr.append(h).append(":00");
+            }
+            dayClauses.add(HardViolationTranslator.dayHourLabel(day, null) + " " + hoursStr);
+        }
+        return joinList(dayClauses, " και ");
+    }
+
+    /** "Γ, Β ή ΑΦΕ" — ένωση λίστας με «, » και το {@code lastSep} πριν το τελευταίο. Κενή → "". */
+    private static String joinList(List<String> items, String lastSep) {
+        if (items == null || items.isEmpty()) return "";
+        if (items.size() == 1) return items.get(0);
+        return String.join(", ", items.subList(0, items.size() - 1))
+                + lastSep + items.get(items.size() - 1);
     }
 
     /**
@@ -267,12 +359,9 @@ public class ValidationEngineService {
         return warnings;
     }
 
-    /** "Γ, Β ή ΑΦΕ" — ένωση λίστας με «, » και « ή » πριν το τελευταίο. Κενή → "". */
+    /** "Γ, Β ή ΑΦΕ" — εναλλακτικές τιμές (διαζευκτικό « ή »). */
     private static String joinPreferred(List<String> items) {
-        if (items == null || items.isEmpty()) return "";
-        if (items.size() == 1) return items.get(0);
-        return String.join(", ", items.subList(0, items.size() - 1))
-                + " ή " + items.get(items.size() - 1);
+        return joinList(items, " ή ");
     }
 
     /**

@@ -377,6 +377,53 @@ class ValidationReportFlipTest {
                 "καμία προτίμηση → κανένα EXAM_PREFERRED warning");
     }
 
+    // ---------- TEACHER_PREFERRED εμπλουτισμένο μήνυμα (TASK 6) ----------
+
+    @Test
+    void teacherPreferred_enrichedMessage_groupedByDay() {
+        Timetable tt = seedTt(Timetable.TimetableType.SEMESTER, Timetable.SemesterType.FALL);
+        Room r = seedRoom("TP", Room.RoomType.CLASSROOM);
+        Course c = seedCourse("TPC", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
+        Teacher t = seedTeacher("Δοκιμαστής Προτ", "TPT1");
+        linkTeacher(c, t);
+        preferTeacher(t, DayOfWeek.TUESDAY, 14);
+        preferTeacher(t, DayOfWeek.TUESDAY, 15);
+        // τοποθέτηση ΕΚΤΟΣ preferred: Δευτέρα 9:00
+        seedAssign(tt, c, r, seedSlot(DayOfWeek.MONDAY, 9), AssignmentType.LECTURE);
+
+        List<Map<String, Object>> tp = byCode(warningsOf(report(tt)), "TEACHER_PREFERRED");
+        assertEquals(1, tp.size(), "1 TEACHER_PREFERRED warning");
+        assertEquals(c.getId(), refId(tp.get(0)));
+        String m = msg(tp.get(0));
+        assertTrue(m.contains("Τρίτη 14:00, 15:00"), "grouped preferred κελιά ανά μέρα: " + m);
+        assertTrue(m.contains("Δευτέρα 9:00"), "μέρα/ώρα τρέχουσας τοποθέτησης: " + m);
+        assertTrue(m.contains(c.getName()), "όνομα μαθήματος: " + m);
+        assertTrue(m.contains("προτιμάει"), "singular διδάσκων: " + m);
+    }
+
+    @Test
+    void teacherPreferred_coTaughtIdenticalPrefs_merged() {
+        Timetable tt = seedTt(Timetable.TimetableType.SEMESTER, Timetable.SemesterType.FALL);
+        Room r = seedRoom("TP2", Room.RoomType.CLASSROOM);
+        Course c = seedCourse("TPC2", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
+        Teacher t1 = seedTeacher("Αλφα Πρωτος", "TPT2a");
+        Teacher t2 = seedTeacher("Βήτα Δευτερος", "TPT2b");
+        linkTeacher(c, t1);
+        linkTeacher(c, t2);
+        // ΤΑΥΤΟΣΗΜΕΣ προτιμήσεις → ενοποίηση σε μία φράση «οι διδάσκοντες …»
+        preferTeacher(t1, DayOfWeek.WEDNESDAY, 10);
+        preferTeacher(t2, DayOfWeek.WEDNESDAY, 10);
+        seedAssign(tt, c, r, seedSlot(DayOfWeek.MONDAY, 9), AssignmentType.LECTURE); // εκτός
+
+        List<Map<String, Object>> tp = byCode(warningsOf(report(tt)), "TEACHER_PREFERRED");
+        assertEquals(1, tp.size());
+        String m = msg(tp.get(0));
+        assertTrue(m.contains("διδάσκοντες") && m.contains("προτιμούν"),
+                "ενοποιημένη πληθυντική φράση για ταυτόσημες προτιμήσεις: " + m);
+        assertTrue(m.contains("Τετάρτη 10:00"), "κοινό preferred κελί: " + m);
+        assertTrue(m.contains("Δευτέρα 9:00"), "placement: " + m);
+    }
+
     // ====================================================================
     // C) Immutability (frozen scope)
     // ====================================================================
@@ -570,6 +617,12 @@ class ValidationReportFlipTest {
         savedTeacherConstraints.add(teacherConstraintRepo.save(TeacherConstraint.builder()
                 .teacher(t).dayOfWeek(day.name()).hour(hour)
                 .constraintType(TeacherConstraint.ConstraintType.BLOCKED).build()));
+    }
+
+    private void preferTeacher(Teacher t, DayOfWeek day, int hour) {
+        savedTeacherConstraints.add(teacherConstraintRepo.save(TeacherConstraint.builder()
+                .teacher(t).dayOfWeek(day.name()).hour(hour)
+                .constraintType(TeacherConstraint.ConstraintType.PREFERRED).build()));
     }
 
     private void blockRoom(Room r, DayOfWeek day, int hour) {
