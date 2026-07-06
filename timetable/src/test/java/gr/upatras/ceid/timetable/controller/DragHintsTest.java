@@ -27,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.ResponseEntity;
 
 import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -127,7 +128,102 @@ class DragHintsTest {
                 "ελεύθερα slots παραμένουν μη-κόκκινα");
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void exam_requiredSameYearSameDay_flaggedRed_otherDatesClean() {
+        // Exam true-positive: δύο ΥΠΟΧΡΕΩΤΙΚΕΣ εξετάσεις ίδιου έτους την ίδια ημερομηνία =
+        // HARD requiredSameYearSameDay. Σύρουμε την Α· κάθε slot της ημερομηνίας όπου κάθεται
+        // η Β (ίδιο έτος, υποχρεωτικό) κοκκινίζει (date-based → όλες οι αίθουσες)· άλλες
+        // ημερομηνίες μένουν καθαρές.
+        LocalDate d1 = LocalDate.of(2026, 9, 1);   // Τρίτη — placement του A
+        LocalDate d2 = LocalDate.of(2026, 9, 2);   // Τετάρτη — εκεί κάθεται ο B (conflict date)
+        LocalDate d3 = LocalDate.of(2026, 9, 3);   // Πέμπτη — καθαρή ημερομηνία
+        Timetable tt = seedExamTt(d1, LocalDate.of(2026, 9, 10));
+        Room r = seedRoom("EX");
+        Course cA = seedCourseTyped("EXA", 2, Course.CourseType.REQUIRED);
+        Course cB = seedCourseTyped("EXB", 2, Course.CourseType.REQUIRED);
+        linkTeacher(cA, seedTeacher("Δοκιμή ΕξΑ", "EXA1"));
+        linkTeacher(cB, seedTeacher("Δοκιμή ΕξΒ", "EXB1"));
+
+        // slots (3ωρα exam windows) σε 3 ημερομηνίες
+        TimeSlot sA = seedExamSlot(d1, 9);
+        TimeSlot sB = seedExamSlot(d2, 9);
+        seedExamSlot(d2, 12);   // δεύτερο window ίδιας ημερομηνίας conflict
+        seedExamSlot(d3, 9);
+        seedExamSlot(d3, 12);
+
+        seedAssignTyped(tt, cB, r, sB, AssignmentType.EXAM);              // B σταθερό στο d2
+        TimetableAssignment a = seedAssignTyped(tt, cA, r, sA, AssignmentType.EXAM); // A → drag
+
+        ResponseEntity<?> resp = controller.dragHints(tt.getId(), a.getId());
+        assertEquals(200, resp.getStatusCode().value());
+        Map<String, Object> body = (Map<String, Object>) resp.getBody();
+        List<Map<String, Object>> hints = (List<Map<String, Object>>) body.get("hints");
+        assertFalse(hints.isEmpty(), "exam grid → μη-κενά hints");
+
+        // ΚΑΘΕ slot της ημερομηνίας d2 (όπου κάθεται ο B) → κόκκινο (required same-year same-day).
+        List<Map<String, Object>> d2Hints = hints.stream()
+                .filter(h -> d2.toString().equals(h.get("day"))).toList();
+        assertFalse(d2Hints.isEmpty(), "υπάρχουν slots για την conflict-ημερομηνία " + d2);
+        assertTrue(d2Hints.stream().allMatch(h -> Boolean.TRUE.equals(h.get("hardViolation"))),
+                "όλα τα slots της conflict-ημερομηνίας κόκκινα: " + d2Hints);
+
+        // Η καθαρή ημερομηνία d3 → κανένα κόκκινο.
+        List<Map<String, Object>> d3Hints = hints.stream()
+                .filter(h -> d3.toString().equals(h.get("day"))).toList();
+        assertFalse(d3Hints.isEmpty(), "υπάρχουν slots για την καθαρή ημερομηνία " + d3);
+        assertTrue(d3Hints.stream().noneMatch(h -> Boolean.TRUE.equals(h.get("hardViolation"))),
+                "καθαρή ημερομηνία → κανένα κόκκινο: " + d3Hints);
+    }
+
     // ---------- helpers ----------
+
+    private Timetable seedExamTt(LocalDate start, LocalDate end) {
+        Timetable t = timetableRepo.save(Timetable.builder()
+                .name(MARK + "EXTT").academicYear("2099-00")
+                .timetableType(Timetable.TimetableType.EXAM)
+                .semesterType(Timetable.SemesterType.SEPTEMBER)
+                .startDate(start).endDate(end)
+                .status(Timetable.Status.DRAFT).createdAt(LocalDateTime.now())
+                .build());
+        savedTimetables.add(t);
+        return t;
+    }
+
+    private TimeSlot seedExamSlot(LocalDate date, int hour) {
+        TimeSlot s = timeSlotRepo.save(TimeSlot.builder()
+                .dayOfWeek(date.getDayOfWeek())
+                .specificDate(date)
+                .startTime(LocalTime.of(hour, 0)).endTime(LocalTime.of(hour + 3, 0))
+                .slotType(TimeSlot.SlotType.EXAM)
+                .build());
+        savedTimeSlots.add(s);
+        return s;
+    }
+
+    private Course seedCourseTyped(String suffix, int year, Course.CourseType type) {
+        Course c = courseRepo.save(Course.builder()
+                .code(MARK + suffix).name("Μάθημα " + suffix)
+                .semester(Math.max(1, year * 2 - 1)).studyYear(year)
+                .courseType(type)
+                .lectureHours(1).tutorialHours(0).labHours(0)
+                .ects(5).expectedStudents(30)
+                .semesterType(Course.SemesterType.FALL)
+                .active(true).visibleInTimetable(true).deleted(false)
+                .build());
+        savedCourses.add(c);
+        return c;
+    }
+
+    private TimetableAssignment seedAssignTyped(Timetable tt, Course c, Room r, TimeSlot s, AssignmentType type) {
+        TimetableAssignment a = assignmentRepo.save(TimetableAssignment.builder()
+                .timetable(tt).course(c).room(r).timeSlot(s)
+                .assignmentType(type).isLocked(false).manuallyAssigned(true)
+                .createdAt(LocalDateTime.now())
+                .build());
+        savedAssignments.add(a);
+        return a;
+    }
 
     private Timetable seedTt() {
         Timetable t = timetableRepo.save(Timetable.builder()

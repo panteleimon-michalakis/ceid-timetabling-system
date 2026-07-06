@@ -185,6 +185,28 @@ public class SolverService {
         solution.setTimeSlots(allSlots);
         solution.setRooms(allRooms);
 
+        // ΚΑΝΟΝΙΚΟΠΟΙΗΣΗ στα value-range instances (by id): το buildPlacedSolution χτίζει
+        // slots/rooms με τον snapshot-first mapper (buildSnapshotTimeSlot), ενώ το value range
+        // με τον LIVE mapper (toSolverTimeSlot). Για EXAM αυτοί διαφέρουν στο dayKey — snapshot
+        // path βγάζει dayOfWeek name για αστάμπωτες αναθέσεις, live path βγάζει ISO ημερομηνία —
+        // σπάζοντας τα date-based hard joins (π.χ. requiredSameYearSameDay). Το drag-hints είναι
+        // ΖΩΝΤΑΝΟ (όχι frozen report immutability), οπότε όλα τα placed lessons δείχνουν στα ίδια
+        // live value-range instances → συνεπές dayKey/day/hour για ΟΛΑ τα constraints.
+        Map<Long, SolverTimeSlot> slotById = new HashMap<>();
+        for (SolverTimeSlot s : allSlots) slotById.putIfAbsent(s.getId(), s);
+        Map<Long, SolverRoom> roomById = new HashMap<>();
+        for (SolverRoom r : allRooms) roomById.putIfAbsent(r.getId(), r);
+        for (Lesson l : solution.getLessons()) {
+            if (l.getTimeSlot() != null) {
+                SolverTimeSlot canonical = slotById.get(l.getTimeSlot().getId());
+                if (canonical != null) l.setTimeSlot(canonical);
+            }
+            if (l.getRoom() != null) {
+                SolverRoom canonical = roomById.get(l.getRoom().getId());
+                if (canonical != null) l.setRoom(canonical);
+            }
+        }
+
         Lesson dragged = null;
         for (Lesson l : solution.getLessons()) {
             if (l.getId().equals(assignmentId)) { dragged = l; break; }
