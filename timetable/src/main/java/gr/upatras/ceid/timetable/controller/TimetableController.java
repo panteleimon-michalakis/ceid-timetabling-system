@@ -2412,6 +2412,9 @@ private Map<Long, Set<String>> buildCourseTeacherKeyMap(List<Course> courses) {
     dto.put("assignmentType", assignment.getAssignmentType() != null ? assignment.getAssignmentType().name() : null);
     dto.put("manuallyAssigned", assignment.getManuallyAssigned());
     dto.put("isLocked", assignment.getIsLocked());
+    // Διάρκεια εξέτασης (λεπτά) — ώστε το UI λεπτομερειών να δείχνει τις πραγματικές
+    // ώρες (π.χ. 4h) αντί για το προεπιλεγμένο 3ωρο. Null για weekly assignments.
+    dto.put("examDurationMinutes", assignment.getExamDurationMinutes());
     // S3d: render-from-snapshot. Χτίζουμε τα live sub-DTOs (κοινά με το
     // placement-options) και ΜΕΤΑ επικαλύπτουμε snapshot-first τα 16 display
     // πεδία: όταν υπάρχει snapshot (το master άλλαξε ή διαγράφηκε) δείχνουμε το
