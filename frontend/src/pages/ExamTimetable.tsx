@@ -533,6 +533,14 @@ export default function ExamTimetable() {
 
   async function handleExamDrop(date: string, hour: string) {
     if (!draggingAssignment || !selectedId) return;
+    // Task 1: no-op όταν το drop γίνεται στο ΙΔΙΟ slot (ίδια ημερομηνία+ώρα) από
+    // όπου ξεκίνησε το drag. Early-return πριν από οποιαδήποτε ενέργεια (πριν
+    // resolveOrCreateSlotId, πριν /move) — ίδια συμπεριφορά με ακυρωμένο drag.
+    if (draggingAssignment.timeSlot?.specificDate === date
+        && normalizeTime(draggingAssignment.timeSlot?.startTime) === hour) {
+      setDraggingAssignment(null);
+      return;
+    }
     const slotId = await resolveOrCreateSlotId(date, hour);
     if (!slotId) { setDraggingAssignment(null); return; }
     // Κανόνας τμήματος: στην εξεταστική επιτρέπεται μοίρασμα αίθουσας,

@@ -502,6 +502,16 @@ function handleDragEnd() {
 async function handleDrop(day: string, hour: string) {
   if (!draggingAssignment || !selectedTimetableId) return;
 
+  // Task 1: no-op όταν το drop γίνεται στο ΙΔΙΟ slot (ίδια μέρα+ώρα) από όπου
+  // ξεκίνησε το drag. Το weekly grid δεν έχει explicit ανά-αίθουσα στήλες, οπότε
+  // η ταυτότητα του slot είναι (dayOfWeek, startTime). Early-return πριν από
+  // οποιαδήποτε ενέργεια (πριν το /move, πριν optimistic update, πριν έλεγχο
+  // αίθουσας) — συμπεριφορά ίδια με ακυρωμένο drag· το dragEnd καθαρίζει το state.
+  if (draggingAssignment.timeSlot?.dayOfWeek === day
+      && normalizeTime(draggingAssignment.timeSlot?.startTime) === hour) {
+    return;
+  }
+
   // Non-blocking (Feature #2): δεν μπλοκάρουμε πια σε 'blocked' hint — η τοποθέτηση
   // προχωρά και το backend επιστρέφει advisory warnings. Τα hints/χρώματα μένουν ως
   // ένδειξη «προσοχή».
