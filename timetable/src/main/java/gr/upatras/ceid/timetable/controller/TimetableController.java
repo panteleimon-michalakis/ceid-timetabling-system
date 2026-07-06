@@ -1305,13 +1305,10 @@ private boolean isExamTimetable(Timetable timetable) {
                     courseId));
             return;
         }
-        if (placedHours < requiredHours) {
-            warnings.add(validationIssue("WARNING", "MISSING_HOURS",
-                    "Το μάθημα " + courseName + " έχει έλλειψη ωρών "
-                            + assignmentTypeLabel(assignmentType) + ": "
-                            + placedHours + "/" + requiredHours + ".",
-                    courseId));
-        }
+        // MISSING_HOURS (placedHours < requiredHours) ΑΦΑΙΡΕΘΗΚΕ από τα weekly warnings
+        // (warnings redesign): τα weekly warnings κρατούν ΜΟΝΟ το teacherPreferredSlot.
+        // Το integrity layer (UNNECESSARY_HOURS/TOO_MANY_HOURS errors) παραμένει ανέπαφο —
+        // γι' αυτό το checkCourseHours ΔΕΝ αφαιρείται, μόνο το κάτω warning block.
     }
 
     private Map<String, Object> validationIssue(

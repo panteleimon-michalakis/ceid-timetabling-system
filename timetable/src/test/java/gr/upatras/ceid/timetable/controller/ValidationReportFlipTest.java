@@ -198,7 +198,10 @@ class ValidationReportFlipTest {
     }
 
     @Test
-    void missingHours_stillReported() {
+    void missingHours_noLongerWarned() {
+        // Warnings redesign: το MISSING_HOURS ΑΦΑΙΡΕΘΗΚΕ από τα weekly warnings — ελλιπές
+        // (1/2) μάθημα ΔΕΝ παράγει πλέον warning. Τα weekly warnings κρατούν μόνο
+        // teacherPreferredSlot· έτσι ένα νέο/κενό πρόγραμμα ξεκινά με warningCount=0.
         Timetable tt = seedTt(Timetable.TimetableType.SEMESTER, Timetable.SemesterType.FALL);
         Course c = seedCourse("MH", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
         linkTeacher(c, seedTeacher("Δοκιμή Ελλ", "BT2"));
@@ -206,8 +209,21 @@ class ValidationReportFlipTest {
         seedAssign(tt, c, seedRoom("B2", Room.RoomType.CLASSROOM), seedSlot(DayOfWeek.MONDAY, 9), AssignmentType.LECTURE); // 1/2
 
         List<Map<String, Object>> mh = byCode(warningsOf(report(tt)), "MISSING_HOURS");
-        assertEquals(1, mh.size());
-        assertEquals(c.getId(), refId(mh.get(0)));
+        assertTrue(mh.isEmpty(), "MISSING_HOURS δεν παράγεται πλέον ως weekly warning");
+    }
+
+    @Test
+    void emptyWeeklyProgram_zeroWarnings() {
+        // Ρητό κριτήριο TASK 1 ("μηδέν στην αρχή"): νέο weekly πρόγραμμα με παγωμένο scope
+        // αλλά ΚΑΜΙΑ ανάθεση → warningCount == 0 (προ-redesign θα έβγαζε MISSING_HOURS για
+        // κάθε απαιτούμενη ώρα κάθε relevant μαθήματος).
+        Timetable tt = seedTt(Timetable.TimetableType.SEMESTER, Timetable.SemesterType.FALL);
+        Course c = seedCourse("EMPTY", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
+        linkTeacher(c, seedTeacher("Δοκιμή Κενό", "BT2b"));
+        seedScope(tt, c, 3, 2, 0, true);   // απαιτεί ώρες αλλά τίποτα δεν τοποθετήθηκε
+
+        assertTrue(warningsOf(report(tt)).isEmpty(),
+                "κενό weekly πρόγραμμα ξεκινά με 0 warnings μετά το redesign");
     }
 
     @Test
@@ -294,7 +310,7 @@ class ValidationReportFlipTest {
     }
 
     @Test
-    void softDeletedCourse_stillValidated_andMissingWhenIncomplete() {
+    void softDeletedCourse_stillValidated_noMissingWarningAfterRedesign() {
         Timetable tt = seedTt(Timetable.TimetableType.SEMESTER, Timetable.SemesterType.FALL);
         Room r = seedRoom("C2", Room.RoomType.CLASSROOM);
         Course c = seedCourse("SD", Course.CourseType.GENERAL_EDUCATION, 2, Course.SemesterType.FALL);
@@ -314,12 +330,14 @@ class ValidationReportFlipTest {
         assertFalse(byCode(warningsOf(report(tt)), "MISSING_HOURS").stream()
                 .anyMatch(i -> cId.equals(refId(i))), "soft-deleted αλλά πλήρες: ακόμη καμία MISSING");
 
-        // αφαίρεση μίας ανάθεσης → 1/2 → MISSING (το frozen scope ακόμη το αναμένει)
+        // αφαίρεση μίας ανάθεσης → 1/2: προ-redesign θα έβγαζε MISSING_HOURS. Μετά το
+        // warnings redesign το MISSING_HOURS αφαιρέθηκε → ΚΑΝΕΝΑ warning (ούτε για το
+        // soft-deleted μάθημα). Το integrity (errors) και το frozen scope μένουν ανέπαφα.
         assignmentRepo.deleteById(a1.getId());
         savedAssignments.remove(a1);
         List<Map<String, Object>> mh = byCode(warningsOf(report(tt)), "MISSING_HOURS").stream()
                 .filter(i -> cId.equals(refId(i))).toList();
-        assertEquals(1, mh.size(), "ελλιπές μετά την αφαίρεση: MISSING για το soft-deleted μάθημα");
+        assertTrue(mh.isEmpty(), "μετά το redesign: κανένα MISSING_HOURS warning παρά το ελλιπές (1/2)");
     }
 
     // ====================================================================
