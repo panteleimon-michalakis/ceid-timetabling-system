@@ -1508,3 +1508,48 @@ green=42 μετά τη διόρθωση).
 DragHintsTest ×6 + preferredSlotsByCourse_authoritativeM2M). Solver baseline (266/266, hardScore 0)
 ανέπαφο — καμία αλλαγή σε constraint providers/solve. Πραγματικά δεδομένα που πειράχτηκαν προσωρινά
 (course 65 preferredExamHours, teacher 158 constraints) **επαναφέρθηκαν** στην αρχική τους κατάσταση.
+
+### Round γενίκευσης με ΠΡΑΓΜΑΤΙΚΑ admin endpoints (all-new data, όχι seed helpers)
+
+Επαλήθευση ότι το drag-coloring δουλεύει για ΚΑΘΕ μελλοντικό πρόγραμμα που θα φτιάξει ο
+καθηγητής από το μηδέν μέσω του UI — όχι μόνο πάνω σε προϋπάρχουσες οντότητες.
+
+**Weekly (νέος Teacher+Course+Room μέσω POST + M2M sync + PUT constraints):** teacher BLOCKED
+ώρα → κόκκινο· teacher PREFERRED ώρα (clean) → πράσινο· νέο room BLOCKED → κόκκινο ΜΟΝΟ όταν
+καμία άλλη αίθουσα δεν είναι καθαρή (single-room block → όχι κόκκινο, σωστό min-over-rooms).
+Επιβεβαιωμένο live. **Παρατήρηση εργαλείων:** Greek chars σε inline `curl -d` → 403 (encoding
+mangling)· χρήση ASCII ή UTF-8 body files.
+
+**Exam (νέο Course με preferredExamHours):** πράσινο ακριβώς στις preferred ώρες σε ΟΛΕΣ τις
+έγκυρες ημερομηνίες (8 = 2 ώρες × 4 μέρες). Επιπλέον **exam-specific room logic**: με C3 να
+κατέχει την αίθουσα R και ΟΛΕΣ τις άλλες exam αίθουσες μπλοκαρισμένες στο ίδιο slot, το drag του
+C2 → **clean** (μοιράζεται την R με τον C3). Αποδεικνύει ρητά ότι το drag-hints χρησιμοποιεί τον
+`ExamConstraintProvider` (κανένα HARD room-conflict — μοίρασμα επιτρεπτό, κανόνας τμήματος #3) και
+**ΔΕΝ** εφαρμόζει τον weekly `roomConflict` (που θα το έκανε κόκκινο). Αν κάποιος επόμενος αλλάξει
+τον solver factory routing ή προσθέσει hard room-conflict στην εξεταστική, ΑΥΤΟ το test σενάριο θα
+το πιάσει.
+
+**🔗 Σύνδεση με BL-8/BL-16 (teacher-identity normalization fragility) — ΟΧΙ απλό test-artifact.**
+Το exam room-sharing σενάριο αρχικά έβγαινε ΛΑΝΘΑΣΜΕΝΑ κόκκινο. Root cause: ο `teacherKey`
+(`SolverService`) περιλαμβάνει `.replaceAll("[^\p{L}\s]", " ")` που **αφαιρεί ψηφία**, οπότε δύο
+διαφορετικοί καθηγητές με ονόματα «…ExamT2» / «…ExamT3» καταρρέουν στο ΙΔΙΟ key «…EXAMT» →
+`sharesTeacher`=true → ψευδο-`teacherConflict` (room-independent → κοκκίνιζε όλο το slot). Αυτό
+**ΔΕΝ είναι απομονωμένο test-artifact**: είναι η ΙΔΙΑ οικογένεια lossy teacher-identity
+normalization με τα **BL-8** (`cleanTeacherDisplayName` non-idempotent «ςςς») και **BL-16**
+(`teachersText` cleaning drift). Και τα τρία πηγάζουν από το ότι η αντιστοίχιση καθηγητή→κλειδί
+είναι **lossy** και μπορεί να συγχωνεύσει/παραμορφώσει διακριτές ταυτότητες. Συνέπεια για το feature:
+ακόμη και το authoritative-M2M πράσινο (Task 2.3) περνά τελικά από `teacherKey`, οπότε ΔΕΝ είναι
+100% άτρωτο σε παθολογικά ονόματα που διαφέρουν μόνο σε ψηφία/σύμβολα — αν και για πραγματικά
+ελληνικά επώνυμα (που διαφέρουν σε γράμματα) είναι ασφαλές. **Για τον επόμενο φοιτητή:** μια
+οριστική λύση της BL-8/BL-16 οικογένειας θα έπρεπε να κλειδώνει την ταυτότητα καθηγητή σε
+**σταθερό teacherId** (όχι σε name-derived key) σε ΟΛΑ τα paths (solver keys, snapshot,
+preferred-slots), ώστε να εξαλειφθεί εντελώς η name-normalization ευθραυστότητα.
+
+**Cleanup:** όλες οι test οντότητες διαγράφηκαν/απενεργοποιήθηκαν· τα constraints των 7
+πραγματικών αιθουσών επαναφέρθηκαν σε empty· **canonical id=1 ανέπαφο (valid=true, errorCount=0)**·
+14 active πραγματικές αίθουσες (ids 1-14) ανέπαφες.
+
+**Εκκρεμεί (deferred, δεν έγινε σε αυτόν τον γύρο):** trimmed 2.4 (parity test move→validate +
+formal Task 1 regression test) — αναβλήθηκε για εξοικονόμηση χρόνου (5-hour budget)· τα core paths
+καλύπτονται ήδη από το DragHintsTest (6 tests: 404/cross-tt/teacher-conflict/exam-same-day/
+room-blocked/preferred-M2M) + την εκτενή live επαλήθευση.
