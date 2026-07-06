@@ -10,6 +10,7 @@ import TimetableSelector from '../components/TimetableSelector';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
 import ValidationIssuesModal from '../components/ValidationIssuesModal';
 import { matchesExamPreference } from './examPreferenceMatch';
+import { isDropOnOriginSlot } from './sameSlotGuard';
 import { esc, shortCode, yearColor, todayGreek, buildPrintDocument, openAndPrint, groupItems, parseTeachers, electiveBucket } from '../utils/printTimetable';
 import { getErrorMessage } from '../utils/errors';
 import type { PrintGroupBy } from '../utils/printTimetable';
@@ -543,8 +544,7 @@ export default function ExamTimetable() {
     // Task 1: no-op όταν το drop γίνεται στο ΙΔΙΟ slot (ίδια ημερομηνία+ώρα) από
     // όπου ξεκίνησε το drag. Early-return πριν από οποιαδήποτε ενέργεια (πριν
     // resolveOrCreateSlotId, πριν /move) — ίδια συμπεριφορά με ακυρωμένο drag.
-    if (draggingAssignment.timeSlot?.specificDate === date
-        && normalizeTime(draggingAssignment.timeSlot?.startTime) === hour) {
+    if (isDropOnOriginSlot(draggingAssignment.timeSlot, date, hour, normalizeTime)) {
       setDraggingAssignment(null);
       return;
     }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { courseService, roomService, timeSlotService, timetableService } from '../api/services';
 import { buildSlotHintMap } from './placementHints';
+import { isDropOnOriginSlot } from './sameSlotGuard';
 import type {
   Course,
   PlacementOption,
@@ -465,8 +466,7 @@ async function handleDrop(day: string, hour: string) {
   // η ταυτότητα του slot είναι (dayOfWeek, startTime). Early-return πριν από
   // οποιαδήποτε ενέργεια (πριν το /move, πριν optimistic update, πριν έλεγχο
   // αίθουσας) — συμπεριφορά ίδια με ακυρωμένο drag· το dragEnd καθαρίζει το state.
-  if (draggingAssignment.timeSlot?.dayOfWeek === day
-      && normalizeTime(draggingAssignment.timeSlot?.startTime) === hour) {
+  if (isDropOnOriginSlot(draggingAssignment.timeSlot, day, hour, normalizeTime)) {
     return;
   }
 
