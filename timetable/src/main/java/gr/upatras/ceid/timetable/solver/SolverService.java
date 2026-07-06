@@ -254,6 +254,32 @@ public class SolverService {
     }
 
     /**
+     * TASK 2.3 — AUTHORITATIVE course → PREFERRED (day,hour) slots για το ζωντανό «πράσινο»
+     * του weekly drag-and-drop. Πηγή: {@link #buildTeacherKeyMap()} (CourseTeacher M2M — ΟΧΙ
+     * {@code teachersText} string-matching, ώστε να αποφεύγεται το BL-8/BL-16 corruption) ∩
+     * {@link TeacherAvailabilityConstraints#PREFERRED_SLOTS} (merged hardcoded registry + DB
+     * teacher_constraints, ίδιο με ό,τι βλέπει ο solver). Επιστρέφει ΜΟΝΟ μαθήματα με ≥1
+     * preferred slot· τιμές σε format "DAY_HOUR" (π.χ. "MONDAY_9"). Read-only· το frontend το
+     * φορτώνει μία φορά και υπολογίζει πράσινο instant (χωρίς per-drag κλήση).
+     */
+    public Map<Long, List<String>> preferredSlotsByCourse() {
+        loadConstraintsFromDb();
+        Map<String, Set<String>> preferred = TeacherAvailabilityConstraints.PREFERRED_SLOTS;
+        if (preferred.isEmpty()) return Map.of();
+        Map<Long, Set<String>> courseKeys = buildTeacherKeyMap();   // authoritative M2M
+        Map<Long, List<String>> out = new LinkedHashMap<>();
+        for (Map.Entry<Long, Set<String>> e : courseKeys.entrySet()) {
+            Set<String> slots = new LinkedHashSet<>();
+            for (String key : e.getValue()) {
+                Set<String> ks = preferred.get(key);
+                if (ks != null) slots.addAll(ks);
+            }
+            if (!slots.isEmpty()) out.put(e.getKey(), new ArrayList<>(slots));
+        }
+        return out;
+    }
+
+    /**
      * Ξαναχτίζει ΤΟΠΟΘΕΤΗΜΕΝΗ λύση από τα saved assignments (live Course, saved
      * slot/room). {@code Lesson.id := assignment.id} ώστε τα indicted Lessons να
      * αντιστοιχίζονται πίσω σε assignment ids. Αγνοεί assignments με null

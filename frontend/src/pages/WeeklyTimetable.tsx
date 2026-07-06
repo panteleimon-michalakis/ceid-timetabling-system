@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import api from '../api/client';
 import { courseService, roomService, timeSlotService, timetableService } from '../api/services';
 import { buildSlotHintMap } from './placementHints';
 import type {
@@ -16,12 +15,6 @@ import type {
   ValidationIssue,
 } from '../types';
 import { getErrorMessage } from '../utils/errors';
-
-/** Σχήμα μιας εγγραφής από GET /teachers/constraints/all. */
-interface TeacherConstraintEntry {
-  teacherName: string;
-  constraints: Array<{ dayOfWeek: string; hour: number; constraintType: string }>;
-}
 import TimetableSelector from '../components/TimetableSelector';
 import MoveAssignmentModal from '../components/MoveAssignmentModal';
 import AssignmentDetailsModal from '../components/AssignmentDetailsModal';
@@ -234,11 +227,15 @@ export default function WeeklyTimetable() {
   const [issuesModal, setIssuesModal] = useState<'ERROR' | 'WARNING' | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
   const [draggingAssignment, setDraggingAssignment] = useState<TimetableAssignment | null>(null);
-  const [dragOptions, setDragOptions] = useState<PlacementOptionsResponse | null>(null);
-  const [instantHintMap, setInstantHintMap] = useState<Map<string, 'allowed' | 'warning' | 'blocked' | 'preferred'>>(new Map());
-  const [teacherConstraintsMap, setTeacherConstraintsMap] = useState<
-    Map<string, Array<{dayOfWeek: string; hour: number; constraintType: string}>>
-  >(new Map());
+  // TASK 2.2/2.3 — 3-state drag coloring: πράσινο (instant, authoritative preferred slots),
+  // κόκκινο (backend solver-hard, overlaid), γκρι (όλα τα άλλα). ΚΑΝΕΝΑ amber.
+  const [dragPreferredKeys, setDragPreferredKeys] = useState<Set<string>>(new Set());
+  const [dragHardKeys, setDragHardKeys] = useState<Set<string>>(new Set());
+  // authoritative courseId → ["DAY_HOUR", ...] preferred slots (M2M, ΟΧΙ teachersText)
+  const [preferredSlotsByCourse, setPreferredSlotsByCourse] = useState<Record<number, string[]>>({});
+  const dragAbortRef = useRef<AbortController | null>(null);
+  // cache backend κόκκινων ανά assignmentId μέσα στην ίδια drag session (καθαρίζει σε reload)
+  const dragHintsCache = useRef<Map<number, Set<string>>>(new Map());
 
   const [scheduling, setScheduling] = useState(false);
   const [autoScheduleResult, setAutoScheduleResult] = useState<AutoScheduleResult | null>(null);
@@ -343,12 +340,17 @@ export default function WeeklyTimetable() {
       : `${dayLabel(a.timeSlot.dayOfWeek)} ${t}`.trim();
   }, [assignmentsById]);
 
-// Feature #3: 3-state hints (πράσινο/amber/κόκκινο) από τα server placement options.
+// Non-drag: hints από τα server placement options (suggested-positions panel).
 const slotHintMap = useMemo(() => buildSlotHintMap(placementOptions), [placementOptions]);
-const dragSlotHintMap = useMemo(() => buildSlotHintMap(dragOptions), [dragOptions]);
 
-// During drag: use API hints if loaded, else instant frontend hints
-const activeDragMap = dragSlotHintMap.size > 0 ? dragSlotHintMap : instantHintMap;
+// TASK 2.2 — drag map: instant πράσινο (preferred) + backend κόκκινο ΠΑΝΩ (add, όχι swap).
+// Το κόκκινο ΠΑΝΤΑ καλύπτει το πράσινο (μπαίνει τελευταίο). Γκρι = ό,τι δεν είναι σε κανένα set.
+const activeDragMap = useMemo(() => {
+  const m = new Map<string, 'blocked' | 'preferred'>();
+  for (const k of dragPreferredKeys) m.set(k, 'preferred');
+  for (const k of dragHardKeys) m.set(k, 'blocked');   // red overrides green
+  return m;
+}, [dragPreferredKeys, dragHardKeys]);
 const activeHintMap = draggingAssignment ? activeDragMap : slotHintMap;
 
   async function loadInitialData() {
@@ -356,20 +358,17 @@ const activeHintMap = draggingAssignment ? activeDragMap : slotHintMap;
     setError(null);
 
     try {
-      const [timetablesRes, coursesRes, roomsRes, timeSlotsRes, teacherConRes] = await Promise.all([
+      const [timetablesRes, coursesRes, roomsRes, timeSlotsRes, preferredRes] = await Promise.all([
         timetableService.getAll(),
         courseService.getAll(),
         roomService.getAll(),
         timeSlotService.getAll(),
-        api.get<TeacherConstraintEntry[]>('/teachers/constraints/all').catch(() => ({ data: [] as TeacherConstraintEntry[] })),
+        // TASK 2.3: authoritative course → preferred slots (M2M) για το ζωντανό πράσινο.
+        courseService.getPreferredSlots().catch(() => ({ data: {} as Record<number, string[]> })),
       ]);
 
       setTimetables(timetablesRes.data.filter((t) => t.timetableType === 'SEMESTER'));
-      const tcMap = new Map<string, Array<{dayOfWeek: string; hour: number; constraintType: string}>>();
-      for (const entry of teacherConRes.data) {
-        tcMap.set(entry.teacherName.toLowerCase(), entry.constraints);
-      }
-      setTeacherConstraintsMap(tcMap);
+      setPreferredSlotsByCourse(preferredRes.data);
       setCourses(coursesRes.data);
       setRooms(roomsRes.data);
       setTimeSlots(timeSlotsRes.data);
@@ -391,6 +390,7 @@ setSelectedTimetableId((previous) => {
   async function loadTimetableData(timetableId: number) {
     setLoadingTimetable(true);
     setError(null);
+    dragHintsCache.current.clear();   // TASK 2.2: οι θέσεις άλλαξαν → invalidate cached κόκκινα
 
     try {
       const [assignmentsRes, progressRes, validationRes] = await Promise.all([
@@ -410,93 +410,51 @@ setSelectedTimetableId((previous) => {
   }
 
 function handleDragStart(assignment: TimetableAssignment) {
+  // ακύρωσε τυχόν προηγούμενο in-flight fetch (γρήγορη εναλλαγή καρτών)
+  dragAbortRef.current?.abort();
   setDraggingAssignment(assignment);
 
-  // 1. INSTANT: compute hints locally from loaded data (<1ms)
-  const blocked = new Set<string>();
-
-  // Track: rooms used per slot, years with required courses per slot
-  const roomsPerSlot = new Map<string, Set<number>>();
-  const reqYearsPerSlot = new Map<string, Set<number>>();
-  const teacherText = assignment.course.teachersText?.trim().toLowerCase() ?? '';
-
-  for (const a of assignments) {
-    if (a.id === assignment.id) continue;
-    if (!a.timeSlot?.dayOfWeek || !a.timeSlot?.startTime) continue;
-    const key = assignmentKey(a.timeSlot.dayOfWeek, normalizeTime(a.timeSlot.startTime));
-
-    // Teacher conflict
-    const aTeacher = a.course.teachersText?.trim().toLowerCase() ?? '';
-    if (teacherText && aTeacher && teacherText === aTeacher) {
-      blocked.add(key);
-    }
-
-    // Room tracking
-    if (!roomsPerSlot.has(key)) roomsPerSlot.set(key, new Set());
-    if (a.room?.id) roomsPerSlot.get(key)!.add(a.room.id);
-
-    // Required same-year tracking
-    if (a.course.courseType === 'REQUIRED' || a.course.courseType === 'REQUIRED_ELECTIVE') {
-      if (!reqYearsPerSlot.has(key)) reqYearsPerSlot.set(key, new Set());
-      reqYearsPerSlot.get(key)!.add(a.course.studyYear);
-    }
+  // INSTANT ΠΡΑΣΙΝΟ (2.3): ΜΟΝΟ από authoritative preferred slots του μαθήματος
+  // (CourseTeacher M2M ∩ PREFERRED_SLOTS — ΟΧΙ teachersText, ώστε να αποφεύγεται το
+  // BL-8/BL-16 corruption). Format "DAY_HOUR" → key "DAY-HH:00". ΚΑΜΙΑ client-side μαντεψιά
+  // για κόκκινο — το κόκκινο είναι αποκλειστικά backend-verified (παρακάτω).
+  const green = new Set<string>();
+  for (const slot of preferredSlotsByCourse[assignment.course.id] ?? []) {
+    const sep = slot.lastIndexOf('_');
+    if (sep <= 0) continue;
+    const day = slot.slice(0, sep);
+    const hour = Number(slot.slice(sep + 1));
+    if (!day || Number.isNaN(hour)) continue;
+    green.add(assignmentKey(day, `${String(hour).padStart(2, '0')}:00`));
   }
+  setDragPreferredKeys(green);
 
-  // Block slots where all rooms are taken
-  const totalRooms = rooms.length;
-  for (const [key, usedRooms] of roomsPerSlot) {
-    if (usedRooms.size >= totalRooms) blocked.add(key);
-  }
-
-  // Block slots where a required course of same year is already placed
-  if (assignment.course.courseType === 'REQUIRED' || assignment.course.courseType === 'REQUIRED_ELECTIVE') {
-    const year = assignment.course.studyYear;
-    for (const [key, years] of reqYearsPerSlot) {
-      if (years.has(year)) blocked.add(key);
-    }
-  }
-
-  // Teacher availability constraints (BLOCKED → red, PREFERRED → bright green)
-  const preferred = new Set<string>();
-  const teacherNames = (assignment.course.teachersText ?? '')
-    .split(/[,;]/).map((n: string) => n.trim().toLowerCase()).filter(Boolean);
-  for (const name of teacherNames) {
-    for (const [mapName, constraints] of teacherConstraintsMap) {
-      const lastName = (s: string) => s.split(' ').pop() ?? '';
-      if (mapName === name || lastName(mapName) === lastName(name)) {
-        for (const c of constraints) {
-          const key = assignmentKey(c.dayOfWeek, `${String(c.hour).padStart(2,'0')}:00`);
-          if (c.constraintType === 'BLOCKED')    blocked.add(key);
-          else if (c.constraintType === 'PREFERRED') preferred.add(key);
-        }
-        break;
+  // BACKEND ΚΟΚΚΙΝΟ (2.1): solver-verified hard violations, overlaid πάνω στο instant.
+  // Cache ανά assignmentId μέσα στην ίδια drag session· abortable· feature-safe degradation.
+  const cached = dragHintsCache.current.get(assignment.id);
+  if (cached) { setDragHardKeys(cached); return; }
+  setDragHardKeys(new Set());
+  if (!selectedTimetableId) return;
+  const controller = new AbortController();
+  dragAbortRef.current = controller;
+  timetableService.getDragHints(selectedTimetableId, assignment.id, controller.signal)
+    .then((res) => {
+      const reds = new Set<string>();
+      for (const h of res.data.hints) {
+        if (h.hardViolation) reds.add(assignmentKey(h.day, `${String(h.hour).padStart(2, '0')}:00`));
       }
-    }
-  }
-
-  // Feature #3: το client-side `blocked` set περιέχει advisory συγκρούσεις
-  // (καθηγητής / όλες οι αίθουσες πιασμένες / υποχρεωτικό ίδιου έτους / BLOCKED
-  // διαθεσιμότητα) — ΟΛΕΣ περνούν στο drop με προειδοποίηση, ΔΕΝ είναι δομικά
-  // blocks. Άρα map σε 'warning' (amber), ώστε το instant hint να ταιριάζει με
-  // το τι θα κάνει πράγματι το drop (δομικό block = κόκκινο, το χειρίζεται μόνο
-  // το server hint μιας και ο client δεν ελέγχει δομικούς κανόνες σε SEMESTER).
-  const instant = new Map<string, 'allowed' | 'warning' | 'blocked' | 'preferred'>();
-  for (const ts of timeSlots) {
-    if (ts.slotType !== 'SEMESTER' || !ts.dayOfWeek || !ts.startTime) continue;
-    const key = assignmentKey(ts.dayOfWeek, normalizeTime(ts.startTime));
-    if (!instant.has(key)) {
-      if (blocked.has(key))        instant.set(key, 'warning');
-      else if (preferred.has(key)) instant.set(key, 'preferred');
-      else                         instant.set(key, 'allowed');
-    }
-  }
-  setInstantHintMap(instant);
+      dragHintsCache.current.set(assignment.id, reds);
+      setDragHardKeys(reds);
+    })
+    .catch(() => { /* feature-safe: αν αποτύχει/ακυρωθεί, μένει μόνο το instant (πράσινο/γκρι) */ });
 }
 
 function handleDragEnd() {
+  dragAbortRef.current?.abort();
+  dragAbortRef.current = null;
   setDraggingAssignment(null);
-  setDragOptions(null);
-  setInstantHintMap(new Map());
+  setDragPreferredKeys(new Set());
+  setDragHardKeys(new Set());
 }
 
 async function handleDrop(day: string, hour: string) {
@@ -543,8 +501,8 @@ async function handleDrop(day: string, hour: string) {
   setWarnings([]);
   const moved = draggingAssignment;
   setDraggingAssignment(null);
-  setDragOptions(null);
-  setInstantHintMap(new Map());
+  setDragPreferredKeys(new Set());
+  setDragHardKeys(new Set());
   try {
     const result = await timetableService.moveAssignment(moved.id, {
       timeSlotId: targetSlot.id,
@@ -1256,9 +1214,10 @@ async function runSolver() {
     ...cellStyle,
     cursor: 'pointer',
     background: (() => {
+      // TASK 2.2: ΜΟΝΟ κόκκινο/πράσινο/γκρι — κανένα amber. ('warning' από τα non-drag
+      // placement options αντιμετωπίζεται ως ουδέτερο.)
       const hint = activeHintMap.get(assignmentKey(day.key, hour));
       if (hint === 'blocked')   return '#1c0a0a';
-      if (hint === 'warning')   return '#2a1d05';
       if (hint === 'preferred') return '#14532d';
       if (hint === 'allowed')   return '#052e16';
       return slotAssignments.length === 0 ? '#0b1120' : '#111827';
@@ -1266,7 +1225,6 @@ async function runSolver() {
     borderLeft: (() => {
       const hint = activeHintMap.get(assignmentKey(day.key, hour));
       if (hint === 'blocked')   return '3px solid #7f1d1d';
-      if (hint === 'warning')   return '3px solid #d97706';
       if (hint === 'preferred') return '3px solid #4ade80';
       if (hint === 'allowed')   return '3px solid #22c55e';
       return cellStyle.borderRight;
@@ -1275,8 +1233,7 @@ async function runSolver() {
   }}
   title={(() => {
     const hint = activeHintMap.get(assignmentKey(day.key, hour));
-    if (hint === 'blocked')   return 'Δεν επιτρέπεται — δομικός κανόνας (το drop θα μπλοκαριστεί)';
-    if (hint === 'warning')   return 'Πιθανή σύγκρουση — επιτρέπεται η τοποθέτηση με προειδοποίηση';
+    if (hint === 'blocked')   return 'Δεν επιτρέπεται — θα προκαλέσει σφάλμα (σύγκρουση)';
     if (hint === 'preferred') return '★ Προτιμώμενη ώρα καθηγητή';
     if (hint === 'allowed')   return 'Επιτρεπτή τοποθέτηση';
     return 'Κλικ για προσθήκη μαθήματος';

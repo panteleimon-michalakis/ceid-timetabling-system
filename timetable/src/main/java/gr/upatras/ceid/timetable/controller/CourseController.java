@@ -25,13 +25,26 @@ public class CourseController {
     private final CourseRepository courseRepo;
     private final CourseTeacherRepository courseTeacherRepo;
     private final TeacherRepository teacherRepo;
+    private final gr.upatras.ceid.timetable.solver.SolverService solverService;
 
     public CourseController(CourseRepository courseRepo,
                            CourseTeacherRepository courseTeacherRepo,
-                           TeacherRepository teacherRepo) {
+                           TeacherRepository teacherRepo,
+                           gr.upatras.ceid.timetable.solver.SolverService solverService) {
         this.courseRepo = courseRepo;
         this.courseTeacherRepo = courseTeacherRepo;
         this.teacherRepo = teacherRepo;
+        this.solverService = solverService;
+    }
+
+    /**
+     * TASK 2.3 — authoritative course → preferred (day,hour) slots για το ζωντανό «πράσινο»
+     * του weekly drag-and-drop. Πηγή: CourseTeacher M2M ∩ PREFERRED_SLOTS (ΟΧΙ teachersText).
+     * Τιμές "DAY_HOUR" (π.χ. "MONDAY_9"). Read-only· preloaded από το frontend.
+     */
+    @GetMapping("/preferred-slots")
+    public ResponseEntity<?> preferredSlots() {
+        return ResponseEntity.ok(solverService.preferredSlotsByCourse());
     }
 
     /**

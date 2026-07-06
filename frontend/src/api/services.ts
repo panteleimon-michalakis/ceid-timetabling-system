@@ -48,7 +48,20 @@ export const courseService = {
   create: (course: Partial<Course>) => api.post<Course>('/courses', course),
   update: (id: number, course: Partial<Course>) => api.put<Course>(`/courses/${id}`, course),
   delete: (id: number) => api.delete(`/courses/${id}`),
+  /**
+   * TASK 2.3 — authoritative courseId → preferred (day,hour) slots ("DAY_HOUR", π.χ.
+   * "MONDAY_9") για το ζωντανό «πράσινο» του weekly drag. Πηγή: CourseTeacher M2M ∩
+   * PREFERRED_SLOTS (ΟΧΙ teachersText). Preloaded μία φορά.
+   */
+  getPreferredSlots: () => api.get<Record<number, string[]>>('/courses/preferred-slots'),
 };
+
+/** TASK 2.1 — απάντηση drag-hints endpoint. */
+export interface DragHintsResponse {
+  timetableId: number;
+  assignmentId: number;
+  hints: Array<{ day: string; hour: number; hardViolation: boolean }>;
+}
 
 export const timeSlotService = {
   getAll: () => api.get<TimeSlot[]>('/timeslots'),
@@ -137,6 +150,16 @@ export const timetableService = {
   getPlacementOptions: (id: number, courseId: number, assignmentType: string) =>
     api.get<PlacementOptionsResponse>(
       `/timetables/${id}/placement-options?courseId=${courseId}&assignmentType=${assignmentType}`
+    ),
+
+  /**
+   * TASK 2.1 — ζωντανός έλεγχος «κόκκινου» ανά κελί για drag-and-drop: ανά (day, hour)
+   * ένα boolean hardViolation (θα προκαλέσει solver-hard σφάλμα η τοποθέτηση εκεί).
+   * Read-only· υποστηρίζει AbortSignal για ακύρωση στο dragEnd.
+   */
+  getDragHints: (id: number, assignmentId: number, signal?: AbortSignal) =>
+    api.get<DragHintsResponse>(
+      `/timetables/${id}/assignments/${assignmentId}/drag-hints`, { signal }
     ),
 
   autoSchedule: (id: number) =>

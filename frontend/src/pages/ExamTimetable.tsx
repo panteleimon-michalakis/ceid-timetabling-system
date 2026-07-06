@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { courseService, roomService, timeSlotService, timetableService } from '../api/services';
 import type {
@@ -265,6 +265,12 @@ export default function ExamTimetable() {
   const [movingAssignment,  setMovingAssignment]  = useState<TimetableAssignment | null>(null);
   const [detailsAssignment, setDetailsAssignment] = useState<TimetableAssignment | null>(null);
   const [draggingAssignment,setDraggingAssignment]= useState<TimetableAssignment | null>(null);
+  // TASK 2.2/2.3 — 3-state drag coloring: πράσινο (preferred exam hours), κόκκινο (backend
+  // solver-hard, overlaid), γκρι (τα υπόλοιπα). Κανένα amber.
+  const [dragPreferredKeys, setDragPreferredKeys] = useState<Set<string>>(new Set());
+  const [dragHardKeys, setDragHardKeys] = useState<Set<string>>(new Set());
+  const dragAbortRef = useRef<AbortController | null>(null);
+  const dragHintsCache = useRef<Map<number, Set<string>>>(new Map());
   const [issuesModal,       setIssuesModal]       = useState<'ERROR' | 'WARNING' | null>(null);
   const [printOpen,         setPrintOpen]         = useState(false);
 
@@ -450,6 +456,7 @@ export default function ExamTimetable() {
 
   async function reloadTimetableData() {
     if (!selectedId) return;
+    dragHintsCache.current.clear();   // TASK 2.2: οι θέσεις άλλαξαν → invalidate cached κόκκινα
     const [aRes, pRes, vRes] = await Promise.all([
       timetableService.getAssignments(selectedId),
       timetableService.getProgress(selectedId),
@@ -577,43 +584,61 @@ export default function ExamTimetable() {
     } finally { setSolving(false); }
   }
 
-  // Instant drag hints for exam grid
+  // TASK 2.2 — exam drag map: instant πράσινο (preferred exam hours) + backend κόκκινο ΠΑΝΩ
+  // (add, όχι swap). Το κόκκινο ΠΑΝΤΑ καλύπτει το πράσινο. Γκρι = ό,τι δεν είναι σε κανένα set.
   const examDragHintMap = useMemo(() => {
-    const map = new Map<string, 'allowed' | 'blocked'>();
-    if (!draggingAssignment) return map;
-
-    const dragYear     = draggingAssignment.course.studyYear;
-    const dragCourseId = draggingAssignment.course.id;
-    const dragType     = draggingAssignment.course.courseType;
-    const dragId       = draggingAssignment.id;
-
-    // Βρες ποιες ημέρες είναι blocked
-    const blockedDates = new Set<string>();
-    for (const a of assignments) {
-      if (a.id === dragId || !a.timeSlot?.specificDate) continue;
-      const date = a.timeSlot.specificDate;
-      // Ίδιο μάθημα οποιαδήποτε ημέρα → blocked
-      if (a.course.id === dragCourseId) {
-        blockedDates.add(date);
-        continue;
-      }
-      // Ίδιο έτος + και τα δύο υποχρεωτικά → blocked ολόκληρη η μέρα
-      if (a.course.studyYear === dragYear &&
-          a.course.courseType === 'REQUIRED' &&
-          dragType === 'REQUIRED') {
-        blockedDates.add(date);
-      }
-    }
-
-    for (const ts of examTimeSlots) {
-      if (!ts.specificDate || !ts.startTime) continue;
-      const key = `${ts.specificDate}-${normalizeTime(ts.startTime)}`;
-      map.set(key, blockedDates.has(ts.specificDate) ? 'blocked' : 'allowed');
-    }
-    return map;
-  }, [draggingAssignment, assignments, examTimeSlots]);
+    const m = new Map<string, 'blocked' | 'preferred'>();
+    for (const k of dragPreferredKeys) m.set(k, 'preferred');
+    for (const k of dragHardKeys) m.set(k, 'blocked');   // red overrides green
+    return m;
+  }, [dragPreferredKeys, dragHardKeys]);
 
   const activeHintMap = draggingAssignment ? examDragHintMap : slotHintMap;
+
+  function handleExamDragStart(assignment: TimetableAssignment) {
+    dragAbortRef.current?.abort();
+    setDraggingAssignment(assignment);
+
+    // INSTANT ΠΡΑΣΙΝΟ (2.3): οι δηλωμένες preferred ώρες εξέτασης του μαθήματος, σε ΟΛΕΣ
+    // τις έγκυρες ημερομηνίες της εξεταστικής. Πηγή = πλήρες Course από courseById (το
+    // assignment DTO ΔΕΝ φέρει preferredExamHours).
+    const green = new Set<string>();
+    const fullCourse = courseById.get(assignment.course.id);
+    const prefHours = (fullCourse?.preferredExamHours ?? '')
+      .split(',').map(s => Number(s.trim())).filter(n => !Number.isNaN(n));
+    if (prefHours.length) {
+      for (const date of examDates) {
+        for (const h of prefHours) green.add(`${date}-${String(h).padStart(2, '0')}:00`);
+      }
+    }
+    setDragPreferredKeys(green);
+
+    // BACKEND ΚΟΚΚΙΝΟ (2.1): solver-verified hard violations, cached/abortable/feature-safe.
+    const cached = dragHintsCache.current.get(assignment.id);
+    if (cached) { setDragHardKeys(cached); return; }
+    setDragHardKeys(new Set());
+    if (!selectedId) return;
+    const controller = new AbortController();
+    dragAbortRef.current = controller;
+    timetableService.getDragHints(selectedId, assignment.id, controller.signal)
+      .then((res) => {
+        const reds = new Set<string>();
+        for (const h of res.data.hints) {
+          if (h.hardViolation) reds.add(`${h.day}-${String(h.hour).padStart(2, '0')}:00`);
+        }
+        dragHintsCache.current.set(assignment.id, reds);
+        setDragHardKeys(reds);
+      })
+      .catch(() => { /* feature-safe: κράτα μόνο το instant (πράσινο/γκρι) */ });
+  }
+
+  function handleExamDragEnd() {
+    dragAbortRef.current?.abort();
+    dragAbortRef.current = null;
+    setDraggingAssignment(null);
+    setDragPreferredKeys(new Set());
+    setDragHardKeys(new Set());
+  }
 
   const allowedOptions = placementOptions?.options.filter(o => o.allowed) ?? [];
   const blockedOptions  = placementOptions?.options.filter(o => !o.allowed) ?? [];
@@ -969,20 +994,21 @@ export default function ExamTimetable() {
                                 onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                 onDrop={e => { e.preventDefault(); handleExamDrop(date, hour); }}
                                 title={
-                                  hint === 'allowed' ? 'Επιτρεπτή τοποθέτηση' :
-                                  hint === 'blocked' ? 'Μη επιτρεπτή τοποθέτηση' :
+                                  hint === 'preferred' ? '★ Προτιμώμενη ώρα εξέτασης' :
+                                  hint === 'blocked' ? 'Δεν επιτρέπεται — θα προκαλέσει σφάλμα (σύγκρουση)' :
                                   slotExists ? 'Κλικ για προσθήκη' : 'Κλικ για προσθήκη (θα δημιουργηθεί χρονοθυρίδα)'
                                 }
                                 style={{
                                   ...tdStyle,
                                   cursor: 'pointer',
+                                  // TASK 2.2: ΜΟΝΟ κόκκινο/πράσινο/γκρι — κανένα amber.
                                   background:
-                                    hint === 'allowed' ? '#052e16' :
                                     hint === 'blocked' ? '#1c0a0a' :
+                                    hint === 'preferred' ? '#14532d' :
                                     cellAssignments.length > 0 ? '#0d1b2e' : '#080f1a',
                                   borderLeft:
-                                    hint === 'allowed' ? '3px solid #22c55e' :
                                     hint === 'blocked' ? '3px solid #7f1d1d' :
+                                    hint === 'preferred' ? '3px solid #4ade80' :
                                     weekStartDates.has(date) ? '3px solid #2563eb' :
                                     '1px solid #1a2744',
                                 }}
@@ -1004,8 +1030,8 @@ export default function ExamTimetable() {
                                           assignment={a}
                                           preferred={preferred}
                                           onShowDetails={() => setDetailsAssignment(a)}
-                                          onDragStart={() => setDraggingAssignment(a)}
-                                          onDragEnd={() => setDraggingAssignment(null)}
+                                          onDragStart={() => handleExamDragStart(a)}
+                                          onDragEnd={() => handleExamDragEnd()}
                                           disabled={saving}
                                         />
                                       );

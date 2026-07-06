@@ -36,6 +36,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -55,6 +56,7 @@ class DragHintsTest {
     private static final String MARK = "TEST_DRAGHINT_";
 
     @Autowired TimetableController controller;
+    @Autowired gr.upatras.ceid.timetable.solver.SolverService solverService;
     @Autowired TimetableRepository timetableRepo;
     @Autowired TimetableAssignmentRepository assignmentRepo;
     @Autowired CourseRepository courseRepo;
@@ -176,7 +178,27 @@ class DragHintsTest {
                 "καθαρή ημερομηνία → κανένα κόκκινο: " + d3Hints);
     }
 
+    @Test
+    void preferredSlotsByCourse_authoritativeM2M() {
+        // TASK 2.3: το πράσινο αντλείται από CourseTeacher M2M ∩ PREFERRED_SLOTS, ΟΧΙ teachersText.
+        Course c = seedCourse("PREF", 2);
+        Teacher t = seedTeacher("Δοκιμή Προτ", "PREF1");
+        linkTeacher(c, t);                         // authoritative M2M link
+        preferTeacher(t, DayOfWeek.WEDNESDAY, 10); // DB PREFERRED constraint
+
+        Map<Long, List<String>> map = solverService.preferredSlotsByCourse();
+        List<String> slots = map.get(c.getId());
+        assertNotNull(slots, "το μάθημα με preferred-slot διδάσκοντα (M2M) εμφανίζεται");
+        assertTrue(slots.contains("WEDNESDAY_10"), "authoritative preferred slot: " + slots);
+    }
+
     // ---------- helpers ----------
+
+    private void preferTeacher(Teacher t, DayOfWeek day, int hour) {
+        savedTeacherConstraints.add(teacherConstraintRepo.save(TeacherConstraint.builder()
+                .teacher(t).dayOfWeek(day.name()).hour(hour)
+                .constraintType(TeacherConstraint.ConstraintType.PREFERRED).build()));
+    }
 
     private Timetable seedExamTt(LocalDate start, LocalDate end) {
         Timetable t = timetableRepo.save(Timetable.builder()
