@@ -59,6 +59,7 @@ class DragHintsTest {
 
     @Autowired TimetableController controller;
     @Autowired gr.upatras.ceid.timetable.solver.SolverService solverService;
+    @Autowired gr.upatras.ceid.timetable.validation.ValidationEngineService validationEngineService;
     @Autowired TimetableRepository timetableRepo;
     @Autowired TimetableAssignmentRepository assignmentRepo;
     @Autowired CourseRepository courseRepo;
@@ -132,6 +133,56 @@ class DragHintsTest {
         // Υπάρχουν και ελεύθερα (μη-κόκκινα) slots — δεν κοκκινίζουν όλα.
         assertTrue(hints.stream().anyMatch(h -> Boolean.FALSE.equals(h.get("hardViolation"))),
                 "ελεύθερα slots παραμένουν μη-κόκκινα");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void dragHintParity_redSlotProducesRealHardError_cleanSlotDoesNot() {
+        // TASK 2.4 — parity: το drag-hint κόκκινο ΠΡΕΠΕΙ να ταυτίζεται με πραγματικό HARD
+        // error μετά από ΠΡΑΓΜΑΤΙΚΟ move (μέσω του ίδιου /move endpoint που χρησιμοποιεί το
+        // UI), και το αντίστροφο: μετακίνηση σε drag-hint-καθαρό slot δεν αφήνει HARD error.
+        // Ίδιο μοτίβο teacher-conflict setup με teacherConflictSlot_flaggedRed_freeSlotsClean.
+        Timetable tt = seedTt();
+        Room r1 = seedRoom("PARa");
+        Room r2 = seedRoom("PARb");
+        Course cA = seedCourse("PARA", 2);
+        Course cB = seedCourse("PARB", 2);
+        Teacher shared = seedTeacher("Κοινός Parity", "PSH");
+        linkTeacher(cA, shared);
+        linkTeacher(cB, shared);
+
+        TimeSlot conflictSlot = seedSlot(DayOfWeek.MONDAY, 9);
+        TimeSlot cleanSlot    = seedSlot(DayOfWeek.TUESDAY, 9);
+        seedAssign(tt, cB, r1, conflictSlot);                                    // B σταθερό
+        TimetableAssignment a = seedAssign(tt, cA, r2, seedSlot(DayOfWeek.FRIDAY, 20)); // A → κουνιέται
+
+        // 1) Prerequisite: το ήδη-δοκιμασμένο drag-hints μονοπάτι λέει MONDAY 9 κόκκινο,
+        //    TUESDAY 9 καθαρό.
+        Map<String, Object> hintBody = (Map<String, Object>) controller.dragHints(tt.getId(), a.getId()).getBody();
+        List<Map<String, Object>> hints = (List<Map<String, Object>>) hintBody.get("hints");
+        assertTrue(hints.stream().anyMatch(h -> "MONDAY".equals(h.get("day"))
+                && ((Number) h.get("hour")).intValue() == 9 && Boolean.TRUE.equals(h.get("hardViolation"))),
+                "prerequisite: MONDAY 9 κόκκινο στο drag-hints");
+        assertTrue(hints.stream().anyMatch(h -> "TUESDAY".equals(h.get("day"))
+                && ((Number) h.get("hour")).intValue() == 9 && Boolean.FALSE.equals(h.get("hardViolation"))),
+                "prerequisite: TUESDAY 9 καθαρό στο drag-hints");
+
+        // 2) ΠΡΑΓΜΑΤΙΚΟ move στο κόκκινο slot, μέσω του ΙΔΙΟΥ /move endpoint με το UI.
+        ResponseEntity<?> moveToRed = controller.moveAssignment(a.getId(), Map.of("timeSlotId", conflictSlot.getId()));
+        assertEquals(200, moveToRed.getStatusCode().value(), "το move πρέπει να πετύχει (non-blocking drop)");
+
+        List<Map<String, Object>> issuesAfterRed = validationEngineService.analyzeHardIssues(tt.getId());
+        assertTrue(issuesAfterRed.stream().anyMatch(i -> ((List<?>) i.get("assignmentIds")).contains(a.getId())),
+                "PARITY: κόκκινο drag-hint ⇒ πραγματικό HARD error στο validation report μετά το move: "
+                        + issuesAfterRed);
+
+        // 3) Move στο ΚΑΘΑΡΟ slot — το HARD error πρέπει να εξαφανιστεί εντελώς.
+        ResponseEntity<?> moveToClean = controller.moveAssignment(a.getId(), Map.of("timeSlotId", cleanSlot.getId()));
+        assertEquals(200, moveToClean.getStatusCode().value());
+
+        List<Map<String, Object>> issuesAfterClean = validationEngineService.analyzeHardIssues(tt.getId());
+        assertFalse(issuesAfterClean.stream().anyMatch(i -> ((List<?>) i.get("assignmentIds")).contains(a.getId())),
+                "PARITY: καθαρό drag-hint ⇒ ΚΑΝΕΝΑ HARD error μετά το move: " + issuesAfterClean);
     }
 
     @Test
