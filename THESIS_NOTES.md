@@ -1082,6 +1082,156 @@ loading UI να σχεδιαστεί· (β) καμία αλλαγή σε `Privat
 `isAuthenticated`, αλλιώς ξαναφέρνει το ίδιο race από αλλού· με τη lazy-initializer προσέγγιση το
 `isAuthenticated` είναι απλά σωστό από την αρχή, χωρίς κανένα δεύτερο invariant να θυμάται κανείς.
 
+## Warnings redesign (weekly + exam) — μόνο τα ζητούμενα warnings
+
+### [TASK 0] Empirical sanity-check ROOM_BLOCKED (gate, καμία αλλαγή κώδικα)
+Πριν οποιαδήποτε αλλαγή, επιβεβαιώθηκε empirically ότι το ROOM_BLOCKED (και το
+παράλληλο TEACHER_BLOCKED) παράγεται σωστά από το πραγματικό `/validation` endpoint.
+Χρησιμοποιήθηκαν τα υπάρχοντα integration tests `ValidationReportFlipTest#roomBlocked_
+reportedByEngine_NEW` + `teacherBlocked_reportedByEngine_NEW` (@SpringBootTest, real DB,
+MARK-seeded, auto-cleanup στο @AfterEach) — ισοδύναμα με «μετακίνηση μαθήματος σε
+δεσμευμένη ώρα αίθουσας σε απομονωμένο αντίγραφο»: πραγματική ανάθεση σε room-blocked
+slot → **1 ROOM_BLOCKED error** μέσω engine (score-explanation → `ConstraintCodeMapping`
+"Room blocked slot"→ROOM_BLOCKED → `HardViolationTranslator`) με σωστό `referenceId` +
+μήνυμα «Η αίθουσα {code} είναι δεσμευμένη τη συγκεκριμένη ώρα: {μάθημα}…». 2/2 πράσινα →
+gate πέρασε, δεν χρειάστηκε live-DB χειρουργική.
+
+### [4a21e92] TASK 1 — Weekly: αφαίρεση MISSING_HOURS, μένει μόνο teacherPreferredSlot
+**«ΠΡΙΝ» ακριβής λίστα weekly warnings** (από ανάγνωση `validateTimetableReport`):
+`{MISSING_HOURS, TEACHER_PREFERRED}`. Το MISSING_HOURS παραγόταν από το κάτω branch του
+`checkCourseHours` (`placedHours < requiredHours`). **«ΜΕΤΑ»:** `{TEACHER_PREFERRED}`.
+Fix surgical: αφαιρέθηκε **μόνο** το MISSING_HOURS warning block μέσα στο `checkCourseHours`
+— το ίδιο method παράγει ΚΑΙ τα integrity errors `UNNECESSARY_HOURS`/`TOO_MANY_HOURS`
+(placedHours>required / required==0), που **μένουν ανέπαφα** (γι' αυτό ΔΕΝ αφαιρέθηκε όλο
+το method, ούτε το call). Το `analyzeTeacherPreferredWarnings` wiring αμετάβλητο.
+Συνέπεια: νέο/κενό weekly πρόγραμμα ξεκινά με **warningCount=0** (προ-redesign έβγαζε
+MISSING_HOURS για κάθε απαιτούμενη ώρα κάθε relevant μαθήματος του παγωμένου scope).
+Tests: `missingHours_stillReported`→`missingHours_noLongerWarned` (assert απουσία),
+`softDeletedCourse…` τελικό block αντεστράφη σε απουσία, νέο `emptyWeeklyProgram_
+zeroWarnings` (κωδικοποιεί το «μηδέν στην αρχή»). Πλήρες backend suite **228/228** πράσινο.
+Εκκρεμεί (TASK 2): exam side (SHARED_EXAM_ROOM/MISSING_EXAM + νέο preferred-room/hour).
+
+### [21e94e6] TASK 2 — Exam: αφαίρεση SHARED_EXAM_ROOM/MISSING_EXAM, νέο EXAM_PREFERRED
+**«ΠΡΙΝ» ακριβής λίστα exam warnings:** `{SHARED_EXAM_ROOM, MISSING_EXAM}`
+(teacherPreferred ήταν guarded σε `!examTimetable` — δεν εμφανιζόταν στην εξεταστική).
+**«ΜΕΤΑ»:** `{EXAM_PREFERRED}` (νέο). Αφαιρέθηκαν: (α) SHARED_EXAM_ROOM (advisory για
+επιτρεπτό μοίρασμα αίθουσας — από τον pairwise loop), (β) MISSING_EXAM (completeness ανά
+μη-τοποθετημένη εξέταση — ο exam κλάδος του completeness block έφυγε, μένει μόνο ο weekly).
+
+**Νέο backend `analyzeExamPreferredWarnings`** (ValidationEngineService): παράλληλο μοτίβο
+με `analyzeTeacherPreferredWarnings` — ομαδοποίηση ΑΝΑ ΜΑΘΗΜΑ, μία γραμμή/μάθημα, με τα
+ονόματα ενεργών διδασκόντων. **ΣΥΜΠΛΗΡΩΜΑΤΙΚΟ του ★** (frontend `examPreferenceMatch`): το ★
+δείχνει iff πλήρης τήρηση (roomOk ∧ hourOk)· το warning iff δηλωμένη προτίμηση ΚΑΙ απόκλιση
+σε αίθουσα ή/και ώρα → ποτέ και τα δύο, ποτέ κανένα, για κάθε τοποθετημένη εξέταση με
+δηλωμένη προτίμηση. **Single source of truth για το CSV parsing:** `SolverService.parseCsv
+Codes/parseCsvHours` έγιναν `public static` (μόνο visibility, καμία λογική/βάρος) και
+καλούνται από το νέο method — ίδιος parser με τον solver ΚΑΙ ίδια match λογική με τον
+`ExamConstraintProvider` (`!preferredRoomCodes.contains(code)` / `!preferredStartHours.contains(h)`).
+Snapshot-first room/hour (ίδιο με `toView`) → σταθερό σε παγωμένα προγράμματα (invariant #1).
+
+**Όγκος (μετρήθηκε ΠΡΙΝ την οριστικοποίηση μηνύματος, canonical 118-exam):** 35 εξετάσεις με
+δηλωμένη προτίμηση, **13 αποκλίνουσες (id 21) / 18 (id 188)** — αρκετά κάτω από το κατώφλι
+30-40 ώστε ένα warning ανά μάθημα να είναι ευανάγνωστο· δεν χρειάστηκε ομαδοποίηση. Μήνυμα:
+«Η εξέταση του μαθήματος {όνομα} (διδ. …) τοποθετήθηκε σε {αίθουσα|ώρα|αίθουσα και ώρα}
+εκτός των προτιμώμενων της εξέτασης.» referenceId=courseId (course-scoped, όπως TEACHER_PREFERRED
+— δεν είναι στο ASSIGNMENT_SCOPED set του frontend, οπότε δεν κακο-εντοπίζεται σε slot).
+
+Tests: `missingExam_stillReported`→`missingExam_noLongerWarned`, `sharedExamRoom_stillWarned`→
+`sharedExamRoom_noLongerWarned` (assert απουσία), + 4 νέα EXAM_PREFERRED (room dev, hour dev,
+πλήρες match→κανένα, καμία προτίμηση→κανένα). Πλήρες backend suite **232/232** πράσινο.
+
+### [50bf624] TASK 5 — Εμπλουτισμός μηνύματος EXAM_PREFERRED (τιμές + μέρα/ώρα τοποθέτησης)
+Η **συνθήκη πυροδότησης αμετάβλητη** (`Set.contains` = ταιριάζει σε ΟΠΟΙΑΔΗΠΟΤΕ προτιμώμενη·
+καμία αλλαγή). Άλλαξε ΜΟΝΟ το μήνυμα: πλέον απαριθμεί τις πραγματικές προτιμώμενες τιμές ανά
+διάσταση που αποκλίνει ΚΑΙ αναφέρει τη μέρα/ώρα της τρέχουσας τοποθέτησης + πραγματική αίθουσα.
+- **ΠΡΙΝ:** «Η εξέταση του μαθήματος X (διδ. …) τοποθετήθηκε σε αίθουσα και ώρα εκτός των
+  προτιμώμενων της εξέτασης.»
+- **ΜΕΤΑ:** «Η εξέταση του μαθήματος X (διδ. …) προτιμάται στην αίθουσα Γ, Β ή ΑΦΕ και στις
+  ώρες 9:00 ή 12:00 — τοποθετήθηκε Τρίτη 9:00 στην αίθουσα Δ.»
+
+**Πηγή τιμών:** το ΙΔΙΟ parsed CSV set (`SolverService.parseCsvCodes/parseCsvHours`) — καμία
+διαφορετική ανάγνωση του raw string· ταξινόμηση ντετερμινιστική (αίθουσες αλφαβητικά, ώρες
+αύξουσα), ένωση με «, » + « ή » πριν την τελευταία (`joinPreferred`). **Ετικέτα μέρας/ώρας:**
+εξήχθη `HardViolationTranslator.dayHourLabel(dayEnum, hour)` από το `timeSuffix` (single source
+of truth για την ελληνική «Δευτέρα 9:00»)· το `timeSuffix` πλέον delegates σε αυτό με **ταυτόσημο
+output** (κλειδωμένο από το HardViolationTranslatorTest 13/13). Ένα warning ανά μάθημα από την
+(πρώτη) αποκλίνουσα εξέταση — στην πράξη 1 εξέταση/μάθημα. Ακέραιες ώρες μόνο (επιβεβαιωμένο).
+Tests: τα 2 θετικά EXAM_PREFERRED ελέγχουν πλέον το εμπλουτισμένο περιεχόμενο + νέο
+`examPreferredBothDeviate_enumeratesAllValues` (πολλαπλές τιμές με « ή »). Suite **233/233**.
+
+### [0592edb] TASK 6 — Εμπλουτισμός μηνύματος TEACHER_PREFERRED (ομαδοποίηση ανά μέρα)
+Η **συνθήκη πυροδότησης αμετάβλητη**· άλλαξε ΜΟΝΟ το μήνυμα. Αντί «N ώρες εκτός preferred»:
+- **ΠΡΙΝ:** «Το μάθημα X (διδ. …) έχει 2 ώρες εκτός των preferred ωρών του διδάσκοντα.»
+- **ΜΕΤΑ:** «Ο διδάσκων X προτιμάει Δευτέρα 14:00, 15:00 και Τρίτη 9:00 — το μάθημα Y
+  τοποθετήθηκε Δευτέρα 9:00.»
+
+**Πηγή preferred κελιών:** το authoritative **merged** `TeacherAvailabilityConstraints.
+PREFERRED_SLOTS` (hardcoded `TeacherAvailabilityRegistry` + DB `teacher_constraints`, με DB
+override — ΟΧΙ σκέτο το teacher_constraints, που θα έχανε τα registry-only preferences), μέσω
+νέου read-only `SolverService.preferredSlotsSnapshot()` που παίρνεται ΑΜΕΣΩΣ μετά το
+`analyzeTeacherPreferredViolations` (ίδιο load pass → αντιστοιχία). course→ονόματα από το ενεργό
+M2M· name→key μέσω νέου `SolverService.teacherKeyOf` (public wrapper, καμία λογική). Νέο
+`groupSlotsByDay` ομαδοποιεί "DAY_HOUR" ανά μέρα (Δευ→Κυρ, ώρες αύξουσα)· ελληνική ετικέτα μέρας
+από το `HardViolationTranslator.dayHourLabel` (reuse). Το placement χρησιμοποιεί την ίδια
+ομαδοποίηση. `joinPreferred` (exam) + η νέα φράση delegate σε κοινό `joinList(items, lastSep)`
+(« ή » για εναλλακτικές exam τιμές, « και » για συζευκτικές μέρες).
+
+**Απόφαση σχεδίασης co-taught:** διδάσκοντες με **ΤΑΥΤΟΣΗΜΗ** ομαδοποίηση preferred ενοποιούνται
+σε μία φράση «οι διδάσκοντες A, B προτιμούν …»· με **διαφορετικές** προτιμήσεις → ξεχωριστές
+φράσεις ενωμένες με «· ». Εμφανίζονται ΟΛΟΙ οι διδάσκοντες-με-προτιμήσεις (όχι μόνο ο
+συγκεκριμένος «παραβιασμένος») — η απλούστερη αληθής περιγραφή, αφού η τρέχουσα τοποθέτηση
+εμφανίζεται ξεχωριστά. Fallback (μη-αναμενόμενο: παραβίαση χωρίς ορατά preferred κελιά) → παλιό
+ύφος με «(διδ. …)». Tests: `teacherPreferred_enrichedMessage_groupedByDay` +
+`teacherPreferred_coTaughtIdenticalPrefs_merged` + `preferTeacher` seed helper. Suite **235/235**.
+Σημ.: το `timeSuffix`/`dayHourLabel` refactor (TASK 5) παραμένει single source of truth για την
+ελληνική ετικέτα μέρας/ώρας σε ΟΛΑ τα μηνύματα (hard + preferred).
+
+### [TASK 7/8] Ζωντανή επαλήθευση end-to-end (καμία αλλαγή κώδικα)
+**TASK 7 (γενικότητα, μέσω API):** νέος καθηγητής («Δοκιμαστικός Επτά», preferred Τρίτη 14/15)
++ νέο μάθημα (TEST7_C1, preferredExamRooms=Γ, preferredExamHours=12), σύνδεση, τοποθέτηση
+ΕΚΤΟΣ προτίμησης → και οι δύο εμπλουτισμένες προειδοποιήσεις εμφανίστηκαν σωστά, διαβασμένες
+δυναμικά από τη βάση (αποδεικνύει ότι η λογική είναι γενική, όχι hardcoded). Weekly:
+«Ο διδάσκων Δοκιμαστικός Επτά προτιμάει Τρίτη 14:00, 15:00 — … τοποθετήθηκε Δευτέρα 9:00.»
+Exam: «… προτιμάται στην αίθουσα Γ και στις ώρες 12:00 — τοποθετήθηκε Τρίτη 9:00 στην αίθουσα Δ1.»
+
+**TASK 8 (drag-and-drop, ζωντανό UI — Playwright αντί claude-in-chrome: η επέκταση δεν είχε
+host-permission για localhost:5173):** Στο TEST7 Weekly, με πραγματικό HTML5 drag-and-drop:
+(1) σύρσιμο κάρτας σε **preferred** κελί (Τρίτη 14:00) → Warnings 1→0 & μήνυμα εξαφανίστηκε
+**αμέσως, χωρίς page refresh**· (2) σύρσιμο σε **μη-preferred** (Τετάρτη 10:00) → Warnings
+0→1 & μήνυμα επανεμφανίστηκε με **δυναμικά ενημερωμένη** μέρα/ώρα («… τοποθετήθηκε Τετάρτη
+10:00»). Exam grid: σύρσιμο σε ώρα 12:00 (preferred) → η ρήτρα ώρας αφαιρέθηκε ζωντανά
+(«αίθουσα Γ και στις ώρες 12:00» → «αίθουσα Γ»), placement ενημερώθηκε σε «Τρίτη 12:00»,
+μένει μόνο η απόκλιση αίθουσας. Επιβεβαιώθηκε ρητά: **κανένα manual refresh** (το frontend
+κάνει ήδη re-fetch validation μετά από κάθε move). **Canonical id=1 ΑΝΕΠΑΦΟ:** valid=true,
+errorCount=0, 266/266 (100%). Όλα τα TEST_ δεδομένα καθαρίστηκαν (transactional, 0 leftovers).
+Παρατήρηση εργαλείου: το byte[] request body στο PS 5.1 `Invoke-RestMethod` έδινε σποραδικά
+403/mojibake· λύθηκε με curl.exe (φρέσκια σύνδεση/process + UTF-8 body file).
+
+### [TASK 7β] Πλήρης αλυσίδα UI→σωστή οντότητα→warning/error, 3 επιφάνειες (Playwright + SQL)
+Για κάθε επιφάνεια: UI action → **SQL επιβεβαίωση σωστής οντότητας** → `/validation` σωστό
+issue → **clear/μηδενισμός μέσω UI** → επιβεβαίωση εξαφάνισης από DB ΚΑΙ warning/error. Μόνο
+TEST_ δεδομένα (teacher 2248, room 2480, course 3611, wtt 3131 @Τρίτη-11:00, ett 3132). pg_dump
+backup πρώτα (τελικά αχρείαστο — καμία μόνιμη αλλαγή σε πραγματικά δεδομένα).
+- **Teachers.tsx** (tab «Διαθεσιμότητα», κελί→κύκλος NEUTRAL→PREFERRED→BLOCKED, «Αποθήκευση
+  αλλαγών»): κλικ Τρίτη 11:00 → BLOCKED → `teacher_constraints` = **1 row (teacher_id=2248,
+  TUESDAY, 11, BLOCKED)**, wrong_entity=0 → `/validation` **TEACHER_BLOCKED** refId=ανάθεση του
+  course 3611. Clear → row διαγράφηκε, error χάθηκε.
+- **Rooms.tsx** («Ώρες» → grid 2-state toggle): Τρίτη 11:00 → BLOCKED → `room_constraints` = **1
+  row room_id=2480** → **ROOM_BLOCKED** refId ίδια ανάθεση. Clear → 0 rows, error χάθηκε.
+  **Εύρημα (SQL έπιασε απόκλιση):** αρχικά η γραμμή γράφτηκε σε **room_id=9 (ΑΦΕ, πραγματική
+  αίθουσα)** αντί για 2480. Root cause: **δικό μου automation bug** (ο index-finder του «Ώρες»
+  button υπερ-ανέβαινε στο DOM και ταίριαζε τη λίστα, επιστρέφοντας τον τελευταίο button).
+  Το UI ήταν **συνεπές** (open=save ίδιο room) — ΟΧΙ product bug. Διορθώθηκε (σωστός index με
+  απομονωμένη κάρτα), η εσφαλμένη γραμμή διαγράφηκε (room_constraints αποκαταστάθηκε σε 0). Δείχνει
+  ότι η SQL-level επιβεβαίωση της αλυσίδας πιάνει πραγματικά discrepancies.
+- **Courses.tsx** (search «TEST7B_C1» → «Επεξ.» → πεδία «Προτιμώμενες αίθουσες/ώρες εξέτασης
+  (CSV)»): Γ / 12 → `courses.id=3611` ενημερώθηκε σωστά (η φόρμα φόρτωσε τις τιμές του σωστού
+  μαθήματος), `/validation` ett 3132 **EXAM_PREFERRED** refId=**3611**. Clear CSV → πεδία κενά,
+  warning χάθηκε.
+Canonical id=1 ΑΝΕΠΑΦΟ (valid=true, errorCount=0, 266/266)· όλα τα TEST_ + η εσφαλμένη γραμμή
+καθαρίστηκαν (0 leftovers, rooms=15/teachers=67 baseline). claude-in-chrome δεν χρησιμοποιήθηκε
+(η επέκταση δεν είχε host-permission για localhost)· όλα με Playwright.
+
 **Verify:** browser automation testing μετά το fix — τα ΙΔΙΑ 3 paths (`/rooms`, `/teachers`, `/courses`)
 έμειναν στο αρχικό path, καμία bounce. Negative control: `localStorage.clear()` + fresh navigation
 σε `/rooms` → σωστά redirect σε `/login` (το πραγματικό auth gate παραμένει άθικτο, το fix έκλεισε
@@ -1233,3 +1383,128 @@ canonical timetable id=1 → πλήρες clean solve() (300s) → `hardScore=0`
 παραμένει (§BL-14). Κατά τη διόρθωση του delivery `demo_data.sql` βρέθηκε επιπλέον ότι
 `DataSeeder.seedUsers()` κάνει hardcode 4 named teacher accounts στο tracked source
 (§BL-15) — απόφαση: παραμένει ως έχει (institutional emails, μη-λειτουργικοί λογαριασμοί).
+
+## [fd36d24] teacherPreferredSlot ως weekly warnings (display-only)
+
+Ο SOFT περιορισμός `teacherPreferredSlot` («πράσινο» κελί καθηγητή) γίνεται πλέον ορατός
+στο weekly `/validation` report ως **warning**, ενώ πριν κανένας soft constraint δεν
+εκτίθονταν (μόνο hard errors + completeness warnings). **Καθαρά ζήτημα ΕΜΦΑΝΙΣΗΣ** — καμία
+αλλαγή σε βάρη/λογική solve (soft παραμένει soft).
+
+**Αρχιτεκτονική:** το `SolutionManager.explain()` υπολογίζει ΗΔΗ όλα τα soft matches στο
+`getConstraintMatchTotalMap()`· το υπάρχον `extractHardViolations` απλώς τα φιλτράρει
+(`hardScore()>=0 → skip`). Νέο **parallel** μονοπάτι (ΑΝΕΠΑΦΟ το hard):
+`extractTeacherPreferredViolations` κρατά ΜΟΝΟ τον constraint `"Teacher not in preferred
+slot"` (φιλτράρισμα by name → κανένα άλλο soft δεν διαρρέει), `analyzeTeacherPreferredViolations`
+(read-only explain, όπως το `analyzeHardViolations`), και `ValidationEngineService`
+ομαδοποιεί **ανά μάθημα** (διδάσκων + πλήθος ωρών) → warnings shape ίδιο με τα υπάρχοντα.
+
+**Απόφαση grouping (χρήστης):** ανά μάθημα/διδάσκοντα αντί για μία γραμμή/ώρα (113 hour-level
+violations στο canonical id=1 → **30** warnings ανά μάθημα). Νέο record `SoftViolation`
+(parallel του `HardViolation`). Weekly-only (ο `ExamConstraintProvider` δεν έχει τον constraint).
+
+**Tests:** `TeacherPreferredViolationTest` (3, pure explain — αποδεικνύει ότι εξάγεται ΜΟΝΟ ο
+teacherPreferredSlot, ΟΧΙ π.χ. ο preferNormalHours). Full suite **227/227** (baseline 224+3).
+E2E σε αντίγραφο live: id=1 → 7 TEACHER_BLOCKED errors (ανέπαφα) + 30 TEACHER_PREFERRED warnings.
+
+**Παρατήρηση (εκτός scope):** το canonical id=1 λύθηκε ΠΡΙΝ καταχωρηθούν οι νέοι περιορισμοί,
+οπότε έχει πλέον **7 πραγματικά TEACHER_BLOCKED** (δεν είναι hardScore 0 έναντι των νέων
+δεδομένων)· ένα re-solve θα τα καθάριζε.
+
+## [6181f94] Ένδειξη preferred exam room/hour στο exam grid (display-only, frontend)
+
+Κάθε τοποθετημένη εξέταση δείχνει μικρό πράσινο ★ όταν είναι στην προτιμώμενη αίθουσα/ώρα
+του μαθήματος (`preferredExamRooms`/`preferredExamHours`). **Θετική-μόνο** ένδειξη (καμία
+αρνητική σήμανση για αποκλίσεις — απόφαση χρήστη). **Καθαρά frontend**.
+
+Εύρημα: το assignment-embedded `courseToDto` ΔΕΝ περιλαμβάνει τα preferredExam πεδία (μόνο το
+standalone `/courses`). Αντί για backend αλλαγή → **pure-frontend join** με τη φορτωμένη λίστα
+`courses` (courseById map). Pure helper `matchesExamPreference` (ίδιο CSV parsing με τον backend·
+match ΜΟΝΟ όταν ικανοποιούνται ΟΛΕΣ οι δηλωμένες room/hour προτιμήσεις). Test
+`examPreferenceMatch.test.ts` (8). Frontend suite 21/21, tsc καθαρό, build OK.
+
+## [69647c2 · 5594033 · fbe02a1 · 08f91ca · b8ab136] Ζωντανός χρωματισμός drag-and-drop (κόκκινο/πράσινο/γκρι)
+
+Πλήρης ανασχεδιασμός του drag-and-drop coloring σε **3-state** (κόκκινο=solver-hard σφάλμα,
+πράσινο=δηλωμένη προτίμηση, γκρι=ουδέτερο) + no-op same-slot drop, σε weekly ΚΑΙ exam grid.
+Feature **read-only/advisory** πάνω στη μηχανή — καμία αλλαγή σε constraint providers/solve·
+solver baseline ανέπαφο (ConstraintVerifier πράσινο σε όλο το suite).
+
+**Task 1 — no-op same-slot drop (`69647c2`).** Το drop στο ΙΔΙΟ slot προέλευσης (ίδια μέρα+ώρα,
+exam: ημερομηνία+ώρα) πυροδοτούσε /move, άλλαζε σειρά, ξανα-διάλεγε αίθουσα. Early-return guard
+στην αρχή και των δύο drop handlers → συμπεριφορά ακυρωμένου drag. Επαληθεύτηκε live· **εύρημα
+μεθόδου:** synthetic HTML5 DnD events που πυροδοτούνται στο ΙΔΙΟ JS tick δεν προλαβαίνουν την
+ενημέρωση του React state (`draggingAssignment` = null στο closure του handleDrop) — η πρώτη
+same-slot «απόδειξη» ήταν άκυρη (επέστρεφε λόγω null, όχι λόγω guard). Διορθώθηκε με two-tick
+dispatch (dragstart → wait → drop), που πλέον διακρίνει «guard παρών» από «απών».
+
+**Task 2.1 — backend `SolverService.analyzeDragHardViolations` (`5594033`).** READ-ONLY· ανά κελί
+`{day, hour, hardViolation}`. Επαναχρησιμοποιεί `loadConstraintsFromDb()` + `buildPlacedSolution()`
+(Φ-SV1) και δουλεύει με **ΕΝΑ** in-memory solution + **ΕΝΑΝ** incremental `InnerScoreDirector`
+(`DefaultSolverFactory.getScoreDirectorFactory().buildScoreDirector(false,false)`): value ranges
+επεκτείνονται σε όλο το grid, και ανά υποψήφιο (slot,room) αλλάζουν ΜΟΝΟ οι δύο planning
+variables του dragged Lesson (`before/afterVariableChanged` + `calculateScore`) — καμία εκ νέου
+φόρτωση DB, κανένα `explain()` per candidate. Κελί κόκκινο ⇔ **καμία** αίθουσα δεν αποφεύγει hard
+violation (early-break στο πρώτο καθαρό room). Endpoint
+`GET /api/timetables/{id}/assignments/{assignmentId}/drag-hints` (404/400 guards). **Χρόνος
+(ζητούμενο gate):** πλήρες dataset id=1 (266 αναθέσεις, 60 slots) **0.82s cold / 0.18–0.27s warm**·
+exam tt188 (118) ~0.2s — άνετα < 1s, χωρίς μείωση candidate set.
+
+**BUG #1 — exam dayKey mismatch (`fbe02a1`).** Το `buildPlacedSolution` χτίζει placed slots με τον
+**snapshot-first** mapper (`buildSnapshotTimeSlot`), ενώ το επεκταμένο value range με τον **live**
+mapper (`toSolverTimeSlot`). Για exam ΑΣΤΑΜΠΩΤΕΣ αναθέσεις (snapshotSpecificDate=null) ο πρώτος
+βγάζει `dayKey = dayOfWeek name` («WEDNESDAY») κι ο δεύτερος `dayKey = ISO date` («2026-09-02»),
+οπότε τα date-based hard joins (`requiredSameYearSameDay`) δεν ταίριαζαν ποτέ → πραγματικές same-day
+συγκρούσεις έμεναν αόρατες (η αρχική παρατήρηση «0 κόκκινα σε exam»). Το drag-hints είναι ΖΩΝΤΑΝΟ
+(όχι frozen-report immutability), οπότε κανονικοποιώ ΟΛΑ τα placed lessons στα ίδια live
+value-range instances (by id) → συνεπές dayKey/day/hour. Weekly ανεπηρέαστο (και οι δύο mappers
+δίνουν dayOfWeek name). Επαληθεύτηκε live: dragging required year-1 exam (id 17130) → **32 κόκκινα**
+(0 πριν), και οι RED ημερομηνίες περιλαμβάνουν **ακριβώς** τις 7 ημερομηνίες των άλλων required
+year-1 εξετάσεων. True-positive test `exam_requiredSameYearSameDay_flaggedRed_otherDatesClean`.
+
+**Task 2.2/2.3 — frontend 3-state + authoritative πράσινο (`08f91ca`).** Αντικαθιστά το νεκρό
+`dragOptions` wire + το client-side 4-state guessing. **Πράσινο (instant, client-side):** weekly από
+**authoritative CourseTeacher M2M ∩ PREFERRED_SLOTS** μέσω νέου read-only `GET /api/courses/preferred-slots`
+(`SolverService.preferredSlotsByCourse`) — **ΟΧΙ** `teachersText` (αποφυγή του γνωστού BL-8/BL-16
+non-idempotent cleaning drift)· preloaded μία φορά → instant. Exam από `course.preferredExamHours`
+σε όλες τις έγκυρες ημερομηνίες. **Κόκκινο (backend-verified):** το /drag-hints set, fetch ανά drag
+με `AbortController`, cache ανά assignmentId (invalidate σε reload). Ποτέ client-side μαντεψιά για
+κόκκινο. **Merge additive:** instant πράσινο → backend κόκκινο ΠΑΝΩ (add, όχι swap)· **κόκκινο πάντα
+καλύπτει πράσινο**. **Amber αφαιρέθηκε παντού** — και από το shared placement-options render path
+('warning' → neutral). Feature-safe degradation (αποτυχία fetch → μένει instant πράσινο/γκρι).
+
+**BUG #2 — DTO gap (exam πράσινο).** Το assignment DTO ΔΕΝ φέρει `preferredExamHours` (μόνο το
+standalone `/courses`) — ίδιο pattern με το ★ finding του 6181f94. Το exam πράσινο διαβάζει πλέον
+από το πλήρες Course μέσω `courseById` (όχι από `assignment.course`). Εντοπίστηκε live (green=0 →
+green=42 μετά τη διόρθωση).
+
+**Generality tests (κρίσιμα — το feature πρέπει να δουλεύει σε ΚΑΘΕ μελλοντικό πρόγραμμα):**
+- **Test 1 (live, weekly, νέα preference):** πρόσθεσα PREFERRED TeacherConstraint σε καθηγητή/μάθημα
+  **χωρίς καμία προηγούμενη προτίμηση** (teacher 158 / course 11, μέσω API = προσομοίωση UI save) →
+  `preferredSlotsByCourse[11]` = το νέο slot → drag → **πράσινο ακριβώς στο σωστό κελί** (WEDNESDAY 10,
+  clean slot)· διαγραφή → **γκρι**. Απόδειξη ίδιου επιπέδου με το exam preferredExamHours. (Παρατήρηση:
+  όταν το preferred slot έχει hard conflict, εμφανίζεται κόκκινο, όχι πράσινο — ο κανόνας προτεραιότητας.)
+- **Test 2 (code, room-blocked, `b8ab136`):** επειδή το drag-hint είναι per-(day,hour) με min-over-rooms,
+  ένα room-block κοκκινίζει κελί ΜΟΝΟ όταν καμία αίθουσα δεν είναι καθαρή εκεί — το test μπλοκάρει ΟΛΕΣ
+  τις semester αίθουσες σε ένα slot → κόκκινο· αλλού καθαρό. Καλύπτει τον 3ο hard κανόνα (μαζί με
+  teacher-conflict + requiredSameYearSameDay).
+
+**A/B έλεγχοι γενίκευσης:**
+- **dayKey στο ΕΠΙΣΗΜΟ `analyzeHardViolations` (report path) για το delivery exam πρόγραμμα:** το report
+  path είναι **εσωτερικά συνεπές** (ΟΛΑ τα lessons μέσω `buildSnapshotTimeSlot`), άρα ΔΕΝ έχει το
+  mismatch του drag-hints. tt188 → **valid=true, errorCount=0**. Διασταύρωση: το tt188 έχει **13**
+  required-same-year groups που μοιράζονται καθημερινή σε >1 ημερομηνία — αν το report χρησιμοποιούσε
+  `dayKey=weekday` θα έβγαζε 13 ψευδείς same-day συγκρούσεις. Το 0-error αποδεικνύει ότι το report
+  χρησιμοποιεί **ISO-date dayKey** → οι tt188 exam αναθέσεις είναι snapshot-stamped στο entity level →
+  **το delivery ΔΕΝ επηρεάζεται**. Λανθάνων κίνδυνος: για υποθετικό ΑΣΤΑΜΠΩΤΟ exam πρόγραμμα το report
+  path θα χρησιμοποιούσε weekday dayKey (πιθανές ψευδείς same-day) — προϋπάρχον, εκτός scope, υποψήφιο
+  BACKLOG (fix = snapshot-first stamping πάντα ή live dayKey στο report).
+- **placement-options amber panel regression:** το panel αποδίδει κανονικά («Επιτρεπτές: 840 / 840»),
+  **κανένα amber** (0 κελιά rgb(42,29,5)), no crash. Το grid-green για placement mode φαίνεται ανενεργό
+  αλλά είναι **pre-existing** (η αφαίρεση amber άγγιξε μόνο το shared 'warning' branch· το 'allowed'→green
+  branch αμετάβλητο).
+
+**Gates:** frontend tsc/ESLint/Vitest 21/21/build ✅· backend suite **241/241** (νέα:
+DragHintsTest ×6 + preferredSlotsByCourse_authoritativeM2M). Solver baseline (266/266, hardScore 0)
+ανέπαφο — καμία αλλαγή σε constraint providers/solve. Πραγματικά δεδομένα που πειράχτηκαν προσωρινά
+(course 65 preferredExamHours, teacher 158 constraints) **επαναφέρθηκαν** στην αρχική τους κατάσταση.
