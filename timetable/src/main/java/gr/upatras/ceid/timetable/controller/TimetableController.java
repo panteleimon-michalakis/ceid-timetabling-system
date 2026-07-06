@@ -240,6 +240,43 @@ public ResponseEntity<?> create(@RequestBody Map<String, String> body) {
         return ResponseEntity.ok(result);
     }
 
+    /**
+     * TASK 2.1 — READ-ONLY drag-hints: ανά κελί (day, hour) του grid ένα boolean
+     * {@code hardViolation} = θα προκαλέσει solver-hard σφάλμα η τοποθέτηση του
+     * συρόμενου μαθήματος εκεί (σε ΚΑΘΕ διαθέσιμη αίθουσα). Τροφοδοτεί το ζωντανό
+     * «κόκκινο» του drag-and-drop. Καμία εγγραφή. Δουλεύει για weekly ΚΑΙ exam.
+     */
+    @GetMapping("/{id}/assignments/{assignmentId}/drag-hints")
+    public ResponseEntity<?> dragHints(@PathVariable Long id, @PathVariable Long assignmentId) {
+        if (!timetableRepo.existsById(id)) {
+            return ResponseEntity.notFound().build();
+        }
+        var assignmentOpt = assignmentRepo.findById(assignmentId);
+        if (assignmentOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        TimetableAssignment assignment = assignmentOpt.get();
+        if (assignment.getTimetable() == null || !assignment.getTimetable().getId().equals(id)) {
+            return badRequest("Η ανάθεση δεν ανήκει σε αυτό το πρόγραμμα.");
+        }
+
+        List<gr.upatras.ceid.timetable.solver.SolverService.DragHint> hints =
+                solverService.analyzeDragHardViolations(id, assignmentId);
+        List<Map<String, Object>> hintDtos = hints.stream().map(h -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("day", h.day());
+            m.put("hour", h.hour());
+            m.put("hardViolation", h.hardViolation());
+            return m;
+        }).toList();
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("timetableId", id);
+        body.put("assignmentId", assignmentId);
+        body.put("hints", hintDtos);
+        return ResponseEntity.ok(body);
+    }
+
     @PostMapping("/{id}/assignments")
     public ResponseEntity<?> addAssignment(
             @PathVariable Long id,

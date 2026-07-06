@@ -8,6 +8,9 @@ import ai.timefold.solver.core.api.score.buildin.hardsoft.HardSoftScore;
 import ai.timefold.solver.core.api.score.ScoreExplanation;
 import ai.timefold.solver.core.api.score.constraint.ConstraintMatch;
 import ai.timefold.solver.core.api.score.constraint.ConstraintMatchTotal;
+import ai.timefold.solver.core.impl.solver.DefaultSolverFactory;
+import ai.timefold.solver.core.impl.score.director.InnerScoreDirector;
+import ai.timefold.solver.core.impl.score.director.InnerScoreDirectorFactory;
 import gr.upatras.ceid.timetable.entity.*;
 import gr.upatras.ceid.timetable.entity.TeacherConstraint;
 import gr.upatras.ceid.timetable.entity.RoomConstraint;
@@ -139,6 +142,93 @@ public class SolverService {
                 SolutionManager.create(solverFactoryFor(tt, null));
         ScoreExplanation<CeidTimetable, HardSoftScore> explanation = sm.explain(solution);
         return extractHardViolations(explanation);
+    }
+
+    /**
+     * Ένα drag-hint ανά κελί (day, hour) του grid: {@code hardViolation=true} σημαίνει
+     * ότι η τοποθέτηση του συρόμενου μαθήματος εκεί θα προκαλέσει ΟΠΟΙΟΔΗΠΟΤΕ solver-hard
+     * σφάλμα (σε ΚΑΘΕ διαθέσιμη αίθουσα). {@code day} = dayKey (όνομα ημέρας για weekly,
+     * ISO ημερομηνία για exam)· {@code hour} = ώρα έναρξης (π.χ. 9).
+     */
+    public record DragHint(String day, int hour, boolean hardViolation) {}
+
+    /**
+     * TASK 2.1 — READ-ONLY ζωντανός έλεγχος «κόκκινου» ανά κελί για drag-and-drop.
+     * Επαναχρησιμοποιεί ΑΥΤΟΥΣΙΑ {@code loadConstraintsFromDb()} + {@code buildPlacedSolution()}
+     * (Φ-SV1) και δουλεύει με ΕΝΑ in-memory solution + ΕΝΑ incremental {@link InnerScoreDirector}:
+     * το solution χτίζεται ΜΙΑ φορά, τα value ranges επεκτείνονται σε ΟΛΟ το grid και για κάθε
+     * υποψήφιο (slot, room) αλλάζουν ΜΟΝΟ οι δύο planning variables του dragged Lesson —
+     * καμία εκ νέου φόρτωση από DB, κανένα {@code explain()} per candidate, μόνο incremental
+     * {@code calculateScore()}.
+     *
+     * <p>Κόκκινο κελί ⇔ ΚΑΜΙΑ αίθουσα σε εκείνο το slot δεν αποφεύγει hard παραβίαση
+     * (room-independent παραβιάσεις — teacher conflict/blocked, required-same-year, lunch,
+     * daily limit — κοκκινίζουν όλες τις αίθουσες· room-dependent — room conflict, lab room,
+     * first-year/required room — κοκκινίζουν μόνο αν πιαστούν όλες οι έγκυρες αίθουσες).
+     * Δουλεύει και για weekly και για exam: το {@code solverFactoryFor}/builders επιλέγουν
+     * τον σωστό ConstraintProvider + value ranges βάσει τύπου προγράμματος.
+     *
+     * <p>Δομικοί περιορισμοί (exam slot type / date bounds) καλύπτονται ήδη από το
+     * {@code buildSolverTimeSlots} που ΔΕΝ βάζει out-of-bounds/excluded exam ημερομηνίες στο
+     * value range — άρα τέτοια κελιά δεν εμφανίζονται καν ως υποψήφια.
+     */
+    public List<DragHint> analyzeDragHardViolations(Long timetableId, Long assignmentId) {
+        Timetable tt = timetableRepo.findById(timetableId).orElseThrow();
+        loadConstraintsFromDb();                 // ΙΔΙΟ με analyzeHardViolations: registries + weights
+        List<TimetableAssignment> assignments = assignmentRepo.findByTimetableId(timetableId);
+        CeidTimetable solution = buildPlacedSolution(tt, assignments);
+
+        // Επέκταση value ranges: το dragged Lesson πρέπει να μπορεί να πάει σε ΟΛΟ το grid,
+        // όχι μόνο στα ήδη-χρησιμοποιούμενα slots/rooms του buildPlacedSolution.
+        List<SolverTimeSlot> allSlots = buildSolverTimeSlots(tt);
+        List<SolverRoom> allRooms = buildSolverRooms(tt);
+        solution.setTimeSlots(allSlots);
+        solution.setRooms(allRooms);
+
+        Lesson dragged = null;
+        for (Lesson l : solution.getLessons()) {
+            if (l.getId().equals(assignmentId)) { dragged = l; break; }
+        }
+        // Ανάθεση με ελλιπή δεδομένα (δεν μπήκε ως Lesson) ή κενό grid → καμία ένδειξη.
+        if (dragged == null || allSlots.isEmpty() || allRooms.isEmpty()) {
+            return List.of();
+        }
+
+        DefaultSolverFactory<CeidTimetable> dsf =
+                (DefaultSolverFactory<CeidTimetable>) solverFactoryFor(tt, null);
+        InnerScoreDirectorFactory<CeidTimetable, HardSoftScore> sdf = dsf.getScoreDirectorFactory();
+
+        List<DragHint> hints = new ArrayList<>(allSlots.size());
+        try (InnerScoreDirector<CeidTimetable, HardSoftScore> sd = sdf.buildScoreDirector(false, false)) {
+            sd.setWorkingSolution(solution);
+
+            // Base: dragged ΑΤΟΠΟΘΕΤΗΤΟ (null vars) — μηδενική hard συνεισφορά, αφού ΟΛΟΙ οι
+            // hard κανόνες φιλτράρουν getTimeSlot()/getRoom() != null. baseHard = οι υπόλοιπες.
+            changeVar(sd, dragged, "timeSlot", null);
+            changeVar(sd, dragged, "room", null);
+            int baseHard = sd.calculateScore().hardScore();
+
+            for (SolverTimeSlot slot : allSlots) {
+                changeVar(sd, dragged, "timeSlot", slot);   // ίδιο timeSlot για όλες τις αίθουσες
+                boolean anyClean = false;
+                for (SolverRoom room : allRooms) {
+                    changeVar(sd, dragged, "room", room);
+                    if (sd.calculateScore().hardScore() >= baseHard) { anyClean = true; break; }
+                }
+                hints.add(new DragHint(slot.getDayKey(), slot.getStartHour(), !anyClean));
+            }
+        }
+        return hints;
+    }
+
+    /** Incremental αλλαγή μίας planning variable του Lesson με σωστό before/after signalling
+     *  στον score director (single-instance what-if, χωρίς rebuild). */
+    private static void changeVar(InnerScoreDirector<CeidTimetable, HardSoftScore> sd,
+                                  Lesson lesson, String var, Object value) {
+        sd.beforeVariableChanged(lesson, var);
+        if ("timeSlot".equals(var)) lesson.setTimeSlot((SolverTimeSlot) value);
+        else                        lesson.setRoom((SolverRoom) value);
+        sd.afterVariableChanged(lesson, var);
     }
 
     /**
