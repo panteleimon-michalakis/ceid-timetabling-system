@@ -42,3 +42,16 @@ logs/
 
 # Προσωπικά δεδομένα — μόνο τοπικά
 docs/private/
+thesis_review_scratch/
+
+# Agent tooling - never commit
+.claude/
+.claude-flow/
+.swarm/
+.playwright-mcp/
+ruvector.db
+*.patch
+
+# Playwright output
+frontend/playwright-report/
+frontend/test-results/
